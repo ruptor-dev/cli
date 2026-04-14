@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/ruptor-dev/cli/internal/evaluator/llmjudge/prompts"
 	"github.com/ruptor-dev/cli/internal/llmclient"
 	"github.com/ruptor-dev/cli/pkg/types"
 )
@@ -38,7 +39,7 @@ func (j *OpenAIJudge) EvaluateChaos(ctx context.Context, prompt, agentBehavior s
 		slog.String("model", j.client.Model()),
 	)
 
-	systemMsg := "You are an AI reliability evaluator. Analyze the agent's behavior and respond with exactly two lines:\nLine 1: VERDICT: PASS or FAIL or PARTIAL\nLine 2: REASON: <your explanation>"
+	systemMsg := prompts.ChaosSystem
 	if prompt != "" {
 		systemMsg = prompt
 	}
@@ -63,8 +64,7 @@ func (j *OpenAIJudge) EvaluateConversation(ctx context.Context, prompt string, h
 		slog.Int("turns", len(history.Turns)),
 	)
 
-	systemMsg := `You are a conversation quality evaluator. Analyze the conversation and respond with valid JSON:
-{"score": <0-100>, "issues": ["issue1", "issue2"]}`
+	systemMsg := prompts.ConversationSystem
 	if prompt != "" {
 		systemMsg = prompt
 	}
