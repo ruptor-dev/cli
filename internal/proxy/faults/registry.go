@@ -27,6 +27,7 @@ func NewFaultRegistry() *FaultRegistry {
 	r.Register(types.FaultEmptyResponse, NewEmptyResponseFault)
 	r.Register(types.FaultRateLimit, NewRateLimitFault)
 	r.Register(types.FaultLLMError, NewLLMErrorFault)
+	r.Register(types.FaultLLMTimeout, NewLLMTimeoutFault)
 
 	return r
 }
