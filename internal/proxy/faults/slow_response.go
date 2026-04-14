@@ -25,8 +25,10 @@ func NewSlowResponseFault(cfg FaultConfig) (types.Fault, error) {
 // Inject sleeps for the configured duration, respecting context cancellation.
 func (f *SlowResponseFault) Inject(w http.ResponseWriter, r *http.Request) error {
 	delay := time.Duration(f.Cfg.DelayMs) * time.Millisecond
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
 	select {
-	case <-time.After(delay):
+	case <-timer.C:
 		w.WriteHeader(http.StatusOK)
 		return nil
 	case <-r.Context().Done():

@@ -3,7 +3,6 @@ package proxy
 import (
 	"fmt"
 	"log/slog"
-	"math/rand"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -26,6 +25,8 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // matchTest finds the first TestConfig whose Tool matches the request path.
+// Note: matching is exact (not prefix/wildcard). Tool paths must match request paths exactly.
+// For example, "/search" matches "/search" but not "/search?q=test" or "/search/order/123".
 func (p *Proxy) matchTest(path string) (config.TestConfig, bool) {
 	for _, t := range p.tests {
 		if t.Tool == path {
@@ -37,7 +38,7 @@ func (p *Proxy) matchTest(path string) (config.TestConfig, bool) {
 
 // shouldInject rolls a random number and returns true if the fault should fire.
 func (p *Proxy) shouldInject(probability float64) bool {
-	return rand.Float64() < probability
+	return p.rng.Float64() < probability
 }
 
 // buildFaultConfig maps TestConfig fields to faults.FaultConfig.

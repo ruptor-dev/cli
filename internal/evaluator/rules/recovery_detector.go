@@ -7,11 +7,11 @@ type RecoveryDetector struct{}
 
 // Detect returns recovery-related behaviors based on whether an error occurred
 // and whether the agent recovered.
-func (d *RecoveryDetector) Detect(hadError bool, recovered bool) []types.DetectedBehavior {
-	if !hadError {
+func (d *RecoveryDetector) Detect(input DetectionInput) []types.DetectedBehavior {
+	if !input.HadError {
 		return nil
 	}
-	if recovered {
+	if input.Recovered {
 		return []types.DetectedBehavior{types.BehaviorRecoverySuccess}
 	}
 	return []types.DetectedBehavior{types.BehaviorRecoveryFailed}

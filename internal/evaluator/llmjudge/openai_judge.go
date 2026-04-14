@@ -1,69 +1,41 @@
 package llmjudge
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
-	"net/http"
 	"strings"
 
+	"github.com/faultforge/faultforge/internal/llmclient"
 	"github.com/faultforge/faultforge/pkg/types"
 )
 
-const (
-	openaiAPIURL = "https://api.openai.com/v1/chat/completions"
-	defaultModel = "gpt-4o-mini"
-)
-
 // OpenAIJudge evaluates agent behavior using the OpenAI chat completions API.
+// Transport, auth, and HTTP error handling are delegated to llmclient.OpenAIClient.
 type OpenAIJudge struct {
-	apiKey string
-	model  string
-	client *http.Client
+	client *llmclient.OpenAIClient
 	logger *slog.Logger
 }
 
 // NewOpenAIJudge creates a new OpenAI-backed judge.
-// If model is empty, defaults to "gpt-4o-mini".
+// If model is empty, defaults to llmclient.DefaultModel.
 func NewOpenAIJudge(apiKey, model string, logger *slog.Logger) *OpenAIJudge {
-	if model == "" {
-		model = defaultModel
-	}
 	return &OpenAIJudge{
-		apiKey: apiKey,
-		model:  model,
-		client: &http.Client{},
+		client: llmclient.New(apiKey, model, llmclient.WithLogger(logger)),
 		logger: logger,
 	}
 }
 
-type chatRequest struct {
-	Model    string        `json:"model"`
-	Messages []chatMessage `json:"messages"`
-}
-
-type chatMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
-}
-
-type chatResponse struct {
-	Choices []struct {
-		Message struct {
-			Content string `json:"content"`
-		} `json:"message"`
-	} `json:"choices"`
-	Error *struct {
-		Message string `json:"message"`
-	} `json:"error"`
+// NewOpenAIJudgeWithClient wires a judge to a caller-provided client. Useful
+// when the caller wants to share a single client across multiple components.
+func NewOpenAIJudgeWithClient(client *llmclient.OpenAIClient, logger *slog.Logger) *OpenAIJudge {
+	return &OpenAIJudge{client: client, logger: logger}
 }
 
 func (j *OpenAIJudge) EvaluateChaos(ctx context.Context, prompt, agentBehavior string) (string, string, error) {
 	j.logger.Debug("evaluating chaos behavior with LLM judge",
-		slog.String("model", j.model),
+		slog.String("model", j.client.Model()),
 	)
 
 	systemMsg := "You are an AI reliability evaluator. Analyze the agent's behavior and respond with exactly two lines:\nLine 1: VERDICT: PASS or FAIL or PARTIAL\nLine 2: REASON: <your explanation>"
@@ -73,10 +45,10 @@ func (j *OpenAIJudge) EvaluateChaos(ctx context.Context, prompt, agentBehavior s
 
 	userMsg := fmt.Sprintf("Agent behavior during fault injection:\n\n%s", agentBehavior)
 
-	content, err := j.complete(ctx, []chatMessage{
+	content, err := j.client.Complete(ctx, []llmclient.Message{
 		{Role: "system", Content: systemMsg},
 		{Role: "user", Content: userMsg},
-	})
+	}, "")
 	if err != nil {
 		return "", "", fmt.Errorf("llmjudge: evaluating chaos: %w", err)
 	}
@@ -87,7 +59,7 @@ func (j *OpenAIJudge) EvaluateChaos(ctx context.Context, prompt, agentBehavior s
 
 func (j *OpenAIJudge) EvaluateConversation(ctx context.Context, prompt string, history *types.ConversationHistory) (int, []string, error) {
 	j.logger.Debug("evaluating conversation with LLM judge",
-		slog.String("model", j.model),
+		slog.String("model", j.client.Model()),
 		slog.Int("turns", len(history.Turns)),
 	)
 
@@ -104,10 +76,10 @@ func (j *OpenAIJudge) EvaluateConversation(ctx context.Context, prompt string, h
 
 	userMsg := fmt.Sprintf("Evaluate this conversation:\n\n%s", string(convBytes))
 
-	content, err := j.complete(ctx, []chatMessage{
+	content, err := j.client.Complete(ctx, []llmclient.Message{
 		{Role: "system", Content: systemMsg},
 		{Role: "user", Content: userMsg},
-	})
+	}, "")
 	if err != nil {
 		return 0, nil, fmt.Errorf("llmjudge: evaluating conversation: %w", err)
 	}
@@ -118,52 +90,6 @@ func (j *OpenAIJudge) EvaluateConversation(ctx context.Context, prompt string, h
 	}
 
 	return score, issues, nil
-}
-
-func (j *OpenAIJudge) complete(ctx context.Context, messages []chatMessage) (string, error) {
-	reqBody := chatRequest{
-		Model:    j.model,
-		Messages: messages,
-	}
-
-	bodyBytes, err := json.Marshal(reqBody)
-	if err != nil {
-		return "", fmt.Errorf("marshaling request: %w", err)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, openaiAPIURL, bytes.NewReader(bodyBytes))
-	if err != nil {
-		return "", fmt.Errorf("creating request: %w", err)
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+j.apiKey)
-
-	resp, err := j.client.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("sending request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	respBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("reading response: %w", err)
-	}
-
-	var chatResp chatResponse
-	if err := json.Unmarshal(respBytes, &chatResp); err != nil {
-		return "", fmt.Errorf("parsing response: %w", err)
-	}
-
-	if chatResp.Error != nil {
-		return "", fmt.Errorf("API error: %s", chatResp.Error.Message)
-	}
-
-	if len(chatResp.Choices) == 0 {
-		return "", fmt.Errorf("no choices in response")
-	}
-
-	return chatResp.Choices[0].Message.Content, nil
 }
 
 // parseChaosResponse extracts verdict and reason from the LLM response.

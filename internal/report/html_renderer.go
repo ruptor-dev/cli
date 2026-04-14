@@ -3,6 +3,7 @@ package report
 import (
 	"fmt"
 	"html/template"
+	"log/slog"
 	"os"
 	"path/filepath"
 
@@ -65,7 +66,11 @@ func (h *HTMLRenderer) RenderSimulate(report *types.ConversationReport) error {
 func (h *HTMLRenderer) loadTemplate(path, fallback string) (*template.Template, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		// Template file doesn't exist yet; use embedded fallback.
+		// Template file not found or not readable; use embedded fallback.
+		slog.Warn("report: template file not readable, using fallback",
+			slog.String("path", path),
+			slog.String("error", err.Error()),
+		)
 		return template.New("report").Parse(fallback)
 	}
 	return template.New("report").Parse(string(data))

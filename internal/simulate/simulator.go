@@ -1,7 +1,9 @@
 package simulate
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -21,17 +23,21 @@ type LLMClient interface {
 // Simulator orchestrates simulated conversations between a persona-driven user
 // and an AI agent under test.
 type Simulator struct {
-	llmClient  LLMClient
-	httpClient *http.Client
-	logger     *slog.Logger
+	llmClient      LLMClient
+	httpClient     *http.Client
+	logger         *slog.Logger
+	agentBaseURL   string
+	agentTimeoutS  int
 }
 
 // NewSimulator creates a Simulator with the provided dependencies.
-func NewSimulator(llmClient LLMClient, httpClient *http.Client, logger *slog.Logger) *Simulator {
+func NewSimulator(llmClient LLMClient, httpClient *http.Client, logger *slog.Logger, agentBaseURL string, agentTimeoutS int) *Simulator {
 	return &Simulator{
-		llmClient:  llmClient,
-		httpClient: httpClient,
-		logger:     logger,
+		llmClient:     llmClient,
+		httpClient:    httpClient,
+		logger:        logger,
+		agentBaseURL:  agentBaseURL,
+		agentTimeoutS: agentTimeoutS,
 	}
 }
 
@@ -102,6 +108,7 @@ func (s *Simulator) Run(ctx context.Context, sim config.Simulation) (*types.Simu
 		TurnCount:    turnCount,
 		MaxTurns:     sim.MaxTurns,
 		DurationMs:   duration.Milliseconds(),
+		History:      history,
 	}, nil
 }
 
@@ -115,7 +122,7 @@ func (s *Simulator) generateUserMessage(ctx context.Context, history *types.Conv
 	return resp, nil
 }
 
-// generateAgentResponse calls the LLM acting as the agent under test.
+// generateAgentResponse calls the agent under test via HTTP, or falls back to LLMClient if no baseURL configured.
 func (s *Simulator) generateAgentResponse(ctx context.Context, history *types.ConversationHistory) (string, error) {
 	// Build agent-perspective messages: strip the persona system prompt and
 	// present the conversation from the agent's point of view.
@@ -128,11 +135,57 @@ func (s *Simulator) generateAgentResponse(ctx context.Context, history *types.Co
 		agentMsgs = append(agentMsgs, m)
 	}
 
-	resp, err := s.llmClient.Complete(ctx, agentMsgs, "")
-	if err != nil {
-		return "", fmt.Errorf("simulate: llm complete: %w", err)
+	// If no agent baseURL configured, use LLMClient (for testing or when not available).
+	if s.agentBaseURL == "" {
+		resp, err := s.llmClient.Complete(ctx, agentMsgs, "")
+		if err != nil {
+			return "", fmt.Errorf("simulate: llm complete: %w", err)
+		}
+		return resp, nil
 	}
-	return resp, nil
+
+	// Call agent under test via HTTP.
+	reqBody := map[string]interface{}{
+		"messages": agentMsgs,
+	}
+	bodyBytes, err := json.Marshal(reqBody)
+	if err != nil {
+		return "", fmt.Errorf("simulate: marshaling request: %w", err)
+	}
+
+	reqCtx, cancel := context.WithTimeout(ctx, time.Duration(s.agentTimeoutS)*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(reqCtx, "POST", s.agentBaseURL, bytes.NewReader(bodyBytes))
+	if err != nil {
+		return "", fmt.Errorf("simulate: creating request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("simulate: calling agent: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		return "", fmt.Errorf("simulate: agent returned HTTP %d", resp.StatusCode)
+	}
+
+	var respData map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&respData); err != nil {
+		return "", fmt.Errorf("simulate: decoding response: %w", err)
+	}
+
+	respStr, ok := respData["response"].(string)
+	if !ok {
+		respStr, ok = respData["message"].(string)
+	}
+	if !ok {
+		return "", fmt.Errorf("simulate: response missing 'response' or 'message' field")
+	}
+
+	return respStr, nil
 }
 
 // checkGoalReached determines whether the agent response satisfies the success

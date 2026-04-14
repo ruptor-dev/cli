@@ -24,6 +24,7 @@ type SimulationResult struct {
 	QualityScore int
 	Issues       []string
 	DurationMs   int64
+	History      *ConversationHistory
 }
 
 type Turn struct {

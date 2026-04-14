@@ -8,8 +8,8 @@ type LoopDetector struct {
 }
 
 // Detect returns BehaviorInfiniteLoop if iterations >= MaxIterations.
-func (d *LoopDetector) Detect(iterations int) []types.DetectedBehavior {
-	if iterations >= d.MaxIterations {
+func (d *LoopDetector) Detect(input DetectionInput) []types.DetectedBehavior {
+	if input.Iterations >= d.MaxIterations {
 		return []types.DetectedBehavior{types.BehaviorInfiniteLoop}
 	}
 	return nil

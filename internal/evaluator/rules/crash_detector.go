@@ -6,8 +6,8 @@ import "github.com/faultforge/faultforge/pkg/types"
 type CrashDetector struct{}
 
 // Detect returns BehaviorCrash if the status code indicates a server error (>= 500).
-func (d *CrashDetector) Detect(statusCode int) []types.DetectedBehavior {
-	if statusCode >= 500 {
+func (d *CrashDetector) Detect(input DetectionInput) []types.DetectedBehavior {
+	if input.StatusCode >= 500 {
 		return []types.DetectedBehavior{types.BehaviorCrash}
 	}
 	return nil

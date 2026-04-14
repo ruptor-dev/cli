@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"math/rand"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -14,7 +15,10 @@ import (
 	"github.com/faultforge/faultforge/internal/proxy/faults"
 )
 
-const defaultTimeout = 30 * time.Second
+const (
+	defaultTimeout        = 30 * time.Second
+	defaultShutdownTimeout = 5 * time.Second
+)
 
 // ProxyOption configures optional Proxy parameters.
 type ProxyOption func(*Proxy)
@@ -33,6 +37,13 @@ func WithTimeout(d time.Duration) ProxyOption {
 	}
 }
 
+// WithRandSource sets a deterministic random source for fault injection probability rolls.
+func WithRandSource(src rand.Source) ProxyOption {
+	return func(p *Proxy) {
+		p.rng = rand.New(src)
+	}
+}
+
 // Proxy is a fault-injecting HTTP reverse proxy that sits between an AI agent
 // and its tool APIs.
 type Proxy struct {
@@ -42,6 +53,7 @@ type Proxy struct {
 	tests    []config.TestConfig
 	logger   *slog.Logger
 	timeout  time.Duration
+	rng      *rand.Rand
 
 	mu       sync.Mutex
 	listener net.Listener
@@ -57,6 +69,7 @@ func NewProxy(cfg *config.ProxyConfig, tests []config.TestConfig, registry *faul
 		registry: registry,
 		logger:   slog.Default(),
 		timeout:  defaultTimeout,
+		rng:      rand.New(rand.NewSource(time.Now().UnixNano())),
 	}
 
 	for _, opt := range opts {
@@ -101,7 +114,7 @@ func (p *Proxy) Start(ctx context.Context) error {
 
 	select {
 	case <-ctx.Done():
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), defaultShutdownTimeout)
 		defer cancel()
 
 		if err := p.server.Shutdown(shutdownCtx); err != nil {

@@ -44,7 +44,7 @@ func TestLoopDetector_Detect(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			d := &rules.LoopDetector{MaxIterations: tt.maxIterations}
-			got := d.Detect(tt.iterations)
+			got := d.Detect(rules.DetectionInput{Iterations: tt.iterations})
 			assert.Equal(t, tt.want, got)
 		})
 	}

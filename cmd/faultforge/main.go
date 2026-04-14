@@ -1,11 +1,8 @@
 package main
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -18,6 +15,7 @@ import (
 	"github.com/faultforge/faultforge/internal/config"
 	"github.com/faultforge/faultforge/internal/evaluator"
 	"github.com/faultforge/faultforge/internal/evaluator/llmjudge"
+	"github.com/faultforge/faultforge/internal/llmclient"
 	"github.com/faultforge/faultforge/internal/proxy"
 	"github.com/faultforge/faultforge/internal/proxy/faults"
 	"github.com/faultforge/faultforge/internal/report"
@@ -226,9 +224,11 @@ func runSimulate(ctx context.Context, cfgPath, outputPath, simFilter string) err
 		return fmt.Errorf("OPENAI_API_KEY environment variable is required for simulations")
 	}
 
-	llmClient := &openAILLMClient{
-		apiKey: apiKey,
-		client: &http.Client{Timeout: 120 * time.Second},
+	llmClient := &simulateLLMAdapter{
+		client: llmclient.New(apiKey, "",
+			llmclient.WithHTTPClient(&http.Client{Timeout: 120 * time.Second}),
+			llmclient.WithLogger(logger),
+		),
 	}
 
 	judge, err := buildJudge(true, logger)
@@ -237,7 +237,11 @@ func runSimulate(ctx context.Context, cfgPath, outputPath, simFilter string) err
 	}
 
 	simEval := evaluator.NewSimulateEvaluator(judge, logger)
-	sim := simulate.NewSimulator(llmClient, &http.Client{Timeout: 60 * time.Second}, logger)
+	timeout := cfg.Agent.RequestTimeoutS
+	if timeout <= 0 {
+		timeout = 30
+	}
+	sim := simulate.NewSimulator(llmClient, &http.Client{Timeout: 60 * time.Second}, logger, cfg.Agent.BaseURL, timeout)
 
 	// Determine output format and path.
 	format := cfg.Output.Format
@@ -281,12 +285,16 @@ func runSimulate(ctx context.Context, cfgPath, outputPath, simFilter string) err
 
 		// Evaluate the simulation if judge prompt is configured.
 		if cfg.Evaluation.LLMJudgePrompt != "" {
+			history := result.History
+			if history == nil {
+				history = &types.ConversationHistory{}
+			}
 			evalResult, err := simEval.Evaluate(
 				ctx,
 				s.ID,
 				s.Persona,
 				s.Goal,
-				&types.ConversationHistory{}, // full history would come from sim run
+				history,
 				cfg.Evaluation.LLMJudgePrompt,
 			)
 			if err != nil {
@@ -352,15 +360,16 @@ func newValidateCmd() *cobra.Command {
 }
 
 func runValidate(cfgPath string) error {
+	logger := slog.Default()
 	_, chaosErr := config.LoadChaos(cfgPath)
 	if chaosErr == nil {
-		fmt.Println("Config valid (chaos)")
+		logger.Info("config valid", slog.String("type", "chaos"))
 		return nil
 	}
 
 	_, simErr := config.LoadSimulate(cfgPath)
 	if simErr == nil {
-		fmt.Println("Config valid (simulate)")
+		logger.Info("config valid", slog.String("type", "simulate"))
 		return nil
 	}
 
@@ -401,82 +410,14 @@ func buildJudge(useLLM bool, logger *slog.Logger) (llmjudge.Judge, error) {
 }
 
 // ---------------------------------------------------------------------------
-// openAILLMClient implements simulate.LLMClient using the OpenAI API.
+// simulateLLMAdapter bridges simulate.LLMClient (map-shaped messages) to the
+// shared llmclient.OpenAIClient.
 // ---------------------------------------------------------------------------
 
-type openAILLMClient struct {
-	apiKey string
-	client *http.Client
+type simulateLLMAdapter struct {
+	client *llmclient.OpenAIClient
 }
 
-func (c *openAILLMClient) Complete(ctx context.Context, messages []map[string]string, model string) (string, error) {
-	if model == "" {
-		model = "gpt-4o-mini"
-	}
-
-	type chatMsg struct {
-		Role    string `json:"role"`
-		Content string `json:"content"`
-	}
-
-	type chatReq struct {
-		Model    string    `json:"model"`
-		Messages []chatMsg `json:"messages"`
-	}
-
-	msgs := make([]chatMsg, 0, len(messages))
-	for _, m := range messages {
-		msgs = append(msgs, chatMsg{Role: m["role"], Content: m["content"]})
-	}
-
-	reqBody := chatReq{Model: model, Messages: msgs}
-
-	bodyBytes, err := json.Marshal(reqBody)
-	if err != nil {
-		return "", fmt.Errorf("marshaling request: %w", err)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.openai.com/v1/chat/completions", bytes.NewReader(bodyBytes))
-	if err != nil {
-		return "", fmt.Errorf("creating request: %w", err)
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+c.apiKey)
-
-	resp, err := c.client.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("sending request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	respBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("reading response: %w", err)
-	}
-
-	var chatResp struct {
-		Choices []struct {
-			Message struct {
-				Content string `json:"content"`
-			} `json:"message"`
-		} `json:"choices"`
-		Error *struct {
-			Message string `json:"message"`
-		} `json:"error"`
-	}
-
-	if err := json.Unmarshal(respBytes, &chatResp); err != nil {
-		return "", fmt.Errorf("parsing response: %w", err)
-	}
-
-	if chatResp.Error != nil {
-		return "", fmt.Errorf("OpenAI API error: %s", chatResp.Error.Message)
-	}
-
-	if len(chatResp.Choices) == 0 {
-		return "", fmt.Errorf("no choices in response")
-	}
-
-	return chatResp.Choices[0].Message.Content, nil
+func (a *simulateLLMAdapter) Complete(ctx context.Context, messages []map[string]string, model string) (string, error) {
+	return a.client.CompleteMap(ctx, messages, model)
 }

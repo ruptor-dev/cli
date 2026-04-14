@@ -13,21 +13,30 @@ import (
 // ChaosEvaluator evaluates agent behavior during chaos testing using
 // rule-based detectors and an optional LLM judge.
 type ChaosEvaluator struct {
-	judge            llmjudge.Judge
-	loopDetector     *rules.LoopDetector
-	crashDetector    *rules.CrashDetector
-	recoveryDetector *rules.RecoveryDetector
-	logger           *slog.Logger
+	judge     llmjudge.Judge
+	detectors []rules.Detector
+	logger    *slog.Logger
 }
 
 // NewChaosEvaluator creates a new ChaosEvaluator with the given judge and configuration.
+// The default detector set (loop, crash, recovery) is installed; use
+// NewChaosEvaluatorWithDetectors to supply a custom set.
 func NewChaosEvaluator(judge llmjudge.Judge, maxIterations int, logger *slog.Logger) *ChaosEvaluator {
+	return NewChaosEvaluatorWithDetectors(judge, logger, []rules.Detector{
+		&rules.LoopDetector{MaxIterations: maxIterations},
+		&rules.CrashDetector{},
+		&rules.RecoveryDetector{},
+	})
+}
+
+// NewChaosEvaluatorWithDetectors creates a ChaosEvaluator with an explicit
+// detector set. Useful for tests and for callers that want to add custom
+// detectors (e.g. repetition, tone).
+func NewChaosEvaluatorWithDetectors(judge llmjudge.Judge, logger *slog.Logger, detectors []rules.Detector) *ChaosEvaluator {
 	return &ChaosEvaluator{
-		judge:            judge,
-		loopDetector:     &rules.LoopDetector{MaxIterations: maxIterations},
-		crashDetector:    &rules.CrashDetector{},
-		recoveryDetector: &rules.RecoveryDetector{},
-		logger:           logger,
+		judge:     judge,
+		detectors: detectors,
+		logger:    logger,
 	}
 }
 
@@ -49,16 +58,17 @@ func (e *ChaosEvaluator) Evaluate(
 	)
 
 	// Run rule-based detectors.
+	input := rules.DetectionInput{
+		Iterations: iterations,
+		StatusCode: statusCode,
+		HadError:   hadError,
+		Recovered:  recovered,
+	}
 	var behaviors []types.DetectedBehavior
-
-	if b := e.loopDetector.Detect(iterations); b != nil {
-		behaviors = append(behaviors, b...)
-	}
-	if b := e.crashDetector.Detect(statusCode); b != nil {
-		behaviors = append(behaviors, b...)
-	}
-	if b := e.recoveryDetector.Detect(hadError, recovered); b != nil {
-		behaviors = append(behaviors, b...)
+	for _, d := range e.detectors {
+		if b := d.Detect(input); b != nil {
+			behaviors = append(behaviors, b...)
+		}
 	}
 
 	// Run LLM judge if prompt is provided.
