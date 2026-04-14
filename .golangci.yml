@@ -1,0 +1,34 @@
+version: "2"
+
+run:
+  timeout: 3m
+
+linters:
+  default: standard
+  settings:
+    errcheck:
+      # fmt.Fprint*/Println and deferred *.Close() errors are idiomatically
+      # ignored in Go when we are writing to a terminal or an os.File we own.
+      # Flagging every one of these buries real errcheck findings.
+      exclude-functions:
+        - (io.Closer).Close
+        - (*os.File).Close
+        - (*net.TCPListener).Close
+        - (net.Listener).Close
+        - (*net/http.Response.Body).Close
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+
+  exclusions:
+    rules:
+      # Tests exercising http.Handler-style writers often ignore write errors
+      # because the test server already tore down. Keep the signal in
+      # non-test code.
+      - path: _test\.go
+        linters:
+          - errcheck
+
+formatters:
+  enable:
+    - gofmt

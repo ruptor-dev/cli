@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/rs/zerolog"
 	"github.com/ruptor-dev/cli/internal/evaluator/llmjudge/prompts"
 	"github.com/ruptor-dev/cli/internal/llmclient"
 	"github.com/ruptor-dev/cli/pkg/types"
-	"github.com/rs/zerolog"
 )
 
 // OpenAIJudge evaluates agent behavior using the OpenAI chat completions API.

@@ -17,19 +17,19 @@ func TestChaosEvaluator_Evaluate(t *testing.T) {
 	judge := &llmjudge.NoopJudge{}
 
 	tests := []struct {
-		name           string
-		testID         string
-		faultType      types.FaultType
-		tool           string
-		statusCode     int
-		iterations     int
-		hadError       bool
-		recovered      bool
-		prompt         string
-		agentBehavior  string
-		wantPassed     bool
-		wantVerdict    string
-		wantBehaviors  []types.DetectedBehavior
+		name          string
+		testID        string
+		faultType     types.FaultType
+		tool          string
+		statusCode    int
+		iterations    int
+		hadError      bool
+		recovered     bool
+		prompt        string
+		agentBehavior string
+		wantPassed    bool
+		wantVerdict   string
+		wantBehaviors []types.DetectedBehavior
 	}{
 		{
 			name:          "clean run passes",

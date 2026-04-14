@@ -6,8 +6,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/ruptor-dev/cli/pkg/types"
 	"github.com/rs/zerolog/log"
+	"github.com/ruptor-dev/cli/pkg/types"
 )
 
 // HTMLRenderer renders reports as HTML files using Go templates.

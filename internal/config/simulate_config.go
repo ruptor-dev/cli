@@ -39,16 +39,16 @@ const (
 // SimAgentConfig describes the agent under test in simulation mode. Mirrors
 // ADR-009 — the full HTTP contract for `ruptor simulate`.
 type SimAgentConfig struct {
-	Name            string     `yaml:"name"`
-	Entrypoint      string     `yaml:"entrypoint"`
-	BaseURL         string     `yaml:"base_url"`
-	Endpoint        string     `yaml:"endpoint"`
-	Protocol        string     `yaml:"protocol"`
-	ResponseFormat  string     `yaml:"response_format"`
-	ResponseField   string     `yaml:"response_field"`
-	Streaming       bool       `yaml:"streaming"`
-	Auth            AgentAuth  `yaml:"auth"`
-	RequestTimeoutS int        `yaml:"request_timeout_s"`
+	Name            string    `yaml:"name"`
+	Entrypoint      string    `yaml:"entrypoint"`
+	BaseURL         string    `yaml:"base_url"`
+	Endpoint        string    `yaml:"endpoint"`
+	Protocol        string    `yaml:"protocol"`
+	ResponseFormat  string    `yaml:"response_format"`
+	ResponseField   string    `yaml:"response_field"`
+	Streaming       bool      `yaml:"streaming"`
+	Auth            AgentAuth `yaml:"auth"`
+	RequestTimeoutS int       `yaml:"request_timeout_s"`
 }
 
 // AgentAuth describes how the simulator authenticates to the agent under

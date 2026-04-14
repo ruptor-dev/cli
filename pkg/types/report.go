@@ -9,15 +9,15 @@ import "time"
 const ReportSchemaVersion = "1.0"
 
 type ReliabilityReport struct {
-	SchemaVersion string        `json:"schema_version"`
-	RuptorVersion string        `json:"ruptor_version"`
-	AgentName     string        `json:"agent_name"`
-	RunAt         time.Time     `json:"run_at"`
-	TotalTests    int           `json:"total_tests"`
-	Passed        int           `json:"passed"`
-	Failed        int           `json:"failed"`
-	Score         int           `json:"score"`
-	Results       []TestResult  `json:"results"`
+	SchemaVersion string       `json:"schema_version"`
+	RuptorVersion string       `json:"ruptor_version"`
+	AgentName     string       `json:"agent_name"`
+	RunAt         time.Time    `json:"run_at"`
+	TotalTests    int          `json:"total_tests"`
+	Passed        int          `json:"passed"`
+	Failed        int          `json:"failed"`
+	Score         int          `json:"score"`
+	Results       []TestResult `json:"results"`
 }
 
 type ConversationReport struct {

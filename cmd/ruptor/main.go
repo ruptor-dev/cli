@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/rs/zerolog"
 	"github.com/ruptor-dev/cli/internal/config"
 	"github.com/ruptor-dev/cli/internal/evaluator"
 	"github.com/ruptor-dev/cli/internal/evaluator/llmjudge"
@@ -21,7 +22,6 @@ import (
 	"github.com/ruptor-dev/cli/internal/simulate"
 	"github.com/ruptor-dev/cli/internal/ui"
 	"github.com/ruptor-dev/cli/pkg/types"
-	"github.com/rs/zerolog"
 	"github.com/spf13/cobra"
 )
 
@@ -131,6 +131,10 @@ func runChaos(ctx context.Context, cfgPath, outputPath, testFilter string) error
 		Int("port", cfg.Proxy.Port).
 		Msg("ruptor chaos proxy starting")
 
+	if err := runChaosTUI(ctx, stop, cfg, tests, p); err != nil {
+		return err
+	}
+
 	if err := waitForProxy(ctx, proxyErrCh, logger); err != nil {
 		return err
 	}
@@ -144,6 +148,13 @@ func runChaos(ctx context.Context, cfgPath, outputPath, testFilter string) error
 		return fmt.Errorf("rendering chaos report: %w", err)
 	}
 
+	ui.PrintCompletion(ui.CompletionSummary{
+		ScorePercent: rpt.Score,
+		Passed:       rpt.Passed,
+		Failed:       rpt.Failed,
+		ReportPaths:  reportPathsFor(renderer, cfg.Output, outputPath),
+	})
+
 	logger.Info().
 		Int("total", rpt.TotalTests).
 		Int("passed", rpt.Passed).
@@ -152,6 +163,107 @@ func runChaos(ctx context.Context, cfgPath, outputPath, testFilter string) error
 		Msg("chaos run complete")
 
 	return nil
+}
+
+// runChaosTUI drives the Bubbletea live-run program. Returns once the
+// user presses 'q' or the context is cancelled. Reading proxy
+// observations every tick is O(tests) under a mutex — fast enough for
+// v1 at the default 100ms tick. See AUDIT.md §10 for the push-channel
+// follow-up.
+func runChaosTUI(ctx context.Context, stop context.CancelFunc, cfg *config.ChaosConfig, tests []config.TestConfig, p *proxy.Proxy) error {
+	if !ui.IsInteractive() {
+		<-ctx.Done()
+		return nil
+	}
+
+	prog := ui.NewRunProgress(ui.RunContext{
+		ConfigFile: cfg.Agent.Name,
+		AgentName:  cfg.Agent.Name,
+		Port:       cfg.Proxy.Port,
+		Entrypoint: cfg.Agent.Entrypoint,
+		Snapshot:   snapshotFn(tests, p, ctx),
+	})
+
+	go func() {
+		<-ctx.Done()
+		prog.Quit()
+	}()
+
+	final, err := prog.Run()
+	stop()
+	if err != nil {
+		return fmt.Errorf("ui: %w", err)
+	}
+	if ui.Aborted(final) {
+		return nil
+	}
+	return nil
+}
+
+// snapshotFn builds the callback the TUI polls on every tick. It maps
+// the proxy's observation map into the UI's ExperimentState slice,
+// preserving the configured test order (observations map is
+// unordered).
+func snapshotFn(tests []config.TestConfig, p *proxy.Proxy, ctx context.Context) ui.SnapshotFn {
+	return func() ui.RunSnapshot {
+		obs := p.Observations()
+		exps := make([]ui.ExperimentState, 0, len(tests))
+		passed, total := 0, 0
+		for _, t := range tests {
+			o := obs[t.ID]
+			seen := o.Hits > 0
+			exps = append(exps, ui.ExperimentState{
+				ID:     t.ID,
+				Status: statusFromObs(o, seen),
+			})
+			if seen && !o.HadError {
+				passed++
+			}
+			if seen {
+				total++
+			}
+		}
+		score := 0
+		if total > 0 {
+			score = (passed * 100) / total
+		}
+		return ui.RunSnapshot{
+			Experiments:  exps,
+			ScorePercent: score,
+			Done:         ctx.Err() != nil,
+		}
+	}
+}
+
+func statusFromObs(o proxy.Observation, seen bool) ui.ExperimentStatus {
+	switch {
+	case !seen:
+		return ui.StatusPending
+	case o.HadError:
+		return ui.StatusFailed
+	default:
+		return ui.StatusPassed
+	}
+}
+
+// reportPathsFor describes the files the renderer wrote, so the
+// completion screen can show them. Kept a pure string builder — no
+// file-system probing.
+func reportPathsFor(_ report.Renderer, outCfg config.OutputConfig, outputPath string) []string {
+	path := outCfg.Path
+	if outputPath != "" {
+		return []string{outputPath}
+	}
+	var out []string
+	switch outCfg.Format {
+	case "json":
+		out = append(out, path+"chaos_report.json")
+	case "html":
+		out = append(out, path+"chaos_report.html")
+	case "both":
+		out = append(out, path+"chaos_report.html")
+	}
+	return out
 }
 
 func filterTests(tests []config.TestConfig, filter string) ([]config.TestConfig, error) {

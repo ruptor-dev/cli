@@ -11,9 +11,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/rs/zerolog"
 	"github.com/ruptor-dev/cli/internal/config"
 	"github.com/ruptor-dev/cli/internal/proxy/faults"
-	"github.com/rs/zerolog"
 )
 
 const (

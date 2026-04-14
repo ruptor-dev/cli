@@ -19,8 +19,8 @@ test:
 lint:
 	golangci-lint run ./...
 
-## check: vet + build + test (run before every commit)
-check: build test
+## check: build + test + vet + lint (run before every commit)
+check: build test lint
 	go vet ./...
 	@echo "✓ All checks passed"
 

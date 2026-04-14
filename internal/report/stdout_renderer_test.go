@@ -24,10 +24,10 @@ func sampleChaosReport() *types.ReliabilityReport {
 		Score:      67,
 		Results: []types.TestResult{
 			{
-				TestID:    "timeout_on_search",
-				FaultType: types.FaultToolTimeout,
-				Tool:      "/search",
-				Passed:    true,
+				TestID:     "timeout_on_search",
+				FaultType:  types.FaultToolTimeout,
+				Tool:       "/search",
+				Passed:     true,
 				DurationMs: 150,
 			},
 			{

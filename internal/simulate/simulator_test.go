@@ -43,12 +43,12 @@ func TestSimulatorRun(t *testing.T) {
 	logger := ui.SilentLogger()
 
 	tests := []struct {
-		name         string
-		sim          config.Simulation
-		responses    []string
-		reachOnCall  int
-		wantReached  bool
-		wantTurns    int
+		name        string
+		sim         config.Simulation
+		responses   []string
+		reachOnCall int
+		wantReached bool
+		wantTurns   int
 	}{
 		{
 			name: "goal reached on first turn",

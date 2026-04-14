@@ -4,10 +4,10 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/rs/zerolog"
 	"github.com/ruptor-dev/cli/internal/evaluator/llmjudge"
 	"github.com/ruptor-dev/cli/internal/evaluator/rules"
 	"github.com/ruptor-dev/cli/pkg/types"
-	"github.com/rs/zerolog"
 )
 
 // ChaosEvaluator evaluates agent behavior during chaos testing using

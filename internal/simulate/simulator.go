@@ -15,9 +15,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rs/zerolog"
 	"github.com/ruptor-dev/cli/internal/config"
 	"github.com/ruptor-dev/cli/pkg/types"
-	"github.com/rs/zerolog"
 )
 
 // LLMClient abstracts the language model used for generating simulated user
@@ -375,4 +375,3 @@ func newUUID() string {
 	h := hex.EncodeToString(b[:])
 	return h[0:8] + "-" + h[8:12] + "-" + h[12:16] + "-" + h[16:20] + "-" + h[20:32]
 }
-
