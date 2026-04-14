@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httputil"
+	"strings"
 	"sync"
 	"time"
 
@@ -16,8 +17,11 @@ import (
 )
 
 const (
-	defaultTimeout        = 30 * time.Second
+	defaultTimeout         = 30 * time.Second
 	defaultShutdownTimeout = 5 * time.Second
+	// portSearchWindow caps how many ports above the requested one we scan
+	// when the requested port is already in use. Prevents unbounded probing.
+	portSearchWindow = 100
 )
 
 // ProxyOption configures optional Proxy parameters.
@@ -87,12 +91,15 @@ func NewProxy(cfg *config.ProxyConfig, tests []config.TestConfig, registry *faul
 
 // Start begins listening and serving HTTP traffic. It blocks until ctx is
 // cancelled or an unrecoverable error occurs.
+//
+// Port selection follows ADR-008: the requested port is tried first; if it
+// is occupied, Start increments by one until it finds a free port or
+// exhausts portSearchWindow attempts. The chosen port is emitted via the
+// "proxy started" log line so the user always sees the real address.
 func (p *Proxy) Start(ctx context.Context) error {
-	addr := fmt.Sprintf(":%d", p.cfg.Port)
-
-	ln, err := net.Listen("tcp", addr)
+	ln, err := listenWithFallback(p.cfg.Port, p.logger)
 	if err != nil {
-		return fmt.Errorf("proxy: listen on %s: %w", addr, err)
+		return err
 	}
 
 	p.mu.Lock()
@@ -153,4 +160,51 @@ func (p *Proxy) Addr() string {
 		return ""
 	}
 	return p.listener.Addr().String()
+}
+
+// listenWithFallback opens a TCP listener, auto-incrementing the port when
+// the requested one is already in use. A port of 0 is passed through
+// unchanged (OS-assigned). See ADR-008.
+func listenWithFallback(startPort int, logger *slog.Logger) (net.Listener, error) {
+	if startPort == 0 {
+		ln, err := net.Listen("tcp", ":0")
+		if err != nil {
+			return nil, fmt.Errorf("proxy: listen on :0: %w", err)
+		}
+		return ln, nil
+	}
+
+	var lastErr error
+	for offset := 0; offset < portSearchWindow; offset++ {
+		port := startPort + offset
+		addr := fmt.Sprintf(":%d", port)
+		ln, err := net.Listen("tcp", addr)
+		if err == nil {
+			if offset > 0 {
+				logger.Warn("proxy: requested port busy, using fallback",
+					slog.Int("requested", startPort),
+					slog.Int("bound", port),
+				)
+			}
+			return ln, nil
+		}
+		if !isAddrInUse(err) {
+			return nil, fmt.Errorf("proxy: listen on %s: %w", addr, err)
+		}
+		lastErr = err
+	}
+	return nil, fmt.Errorf("proxy: no free port in [%d,%d): %w",
+		startPort, startPort+portSearchWindow, lastErr)
+}
+
+// isAddrInUse returns true when err is an "address already in use" error.
+// Matches the error string across platforms rather than switching on
+// syscall.EADDRINUSE to avoid GOOS-specific build tags.
+func isAddrInUse(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "address already in use") ||
+		strings.Contains(msg, "Only one usage of each socket address")
 }
