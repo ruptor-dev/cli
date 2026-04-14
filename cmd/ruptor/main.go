@@ -238,11 +238,10 @@ func runSimulate(ctx context.Context, cfgPath, outputPath, simFilter string) err
 	}
 
 	simEval := evaluator.NewSimulateEvaluator(judge, logger)
-	timeout := cfg.Agent.RequestTimeoutS
-	if timeout <= 0 {
-		timeout = 30
+	if cfg.Agent.RequestTimeoutS <= 0 {
+		cfg.Agent.RequestTimeoutS = 30
 	}
-	sim := simulate.NewSimulator(llmClient, &http.Client{Timeout: 60 * time.Second}, logger, cfg.Agent.BaseURL, timeout)
+	sim := simulate.NewSimulator(llmClient, &http.Client{Timeout: 60 * time.Second}, logger, cfg.Agent)
 
 	// Determine output format and path.
 	format := cfg.Output.Format

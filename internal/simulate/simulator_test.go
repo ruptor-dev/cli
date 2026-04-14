@@ -111,7 +111,7 @@ func TestSimulatorRun(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			stub := &stubLLMClient{responses: tt.responses}
-			sim := NewSimulator(stub, http.DefaultClient, logger, "", 30)
+			sim := NewSimulatorFromBaseURL(stub, http.DefaultClient, logger, "", 30)
 
 			result, err := sim.Run(context.Background(), tt.sim)
 
@@ -137,7 +137,7 @@ func TestSimulatorRun_ContextCancellation(t *testing.T) {
 	cancel() // Cancel immediately.
 
 	stub := &stubLLMClient{responses: []string{"hello", "world"}}
-	sim := NewSimulator(stub, http.DefaultClient, slog.Default(), "http://localhost:3000", 30)
+	sim := NewSimulatorFromBaseURL(stub, http.DefaultClient, slog.Default(), "http://localhost:3000", 30)
 
 	result, err := sim.Run(ctx, config.Simulation{
 		ID:              "cancel-test",
