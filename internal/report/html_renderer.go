@@ -3,11 +3,11 @@ package report
 import (
 	"fmt"
 	"html/template"
-	"log/slog"
 	"os"
 	"path/filepath"
 
 	"github.com/ruptor-dev/cli/pkg/types"
+	"github.com/rs/zerolog/log"
 )
 
 // HTMLRenderer renders reports as HTML files using Go templates.
@@ -67,10 +67,10 @@ func (h *HTMLRenderer) loadTemplate(path, fallback string) (*template.Template, 
 	data, err := os.ReadFile(path)
 	if err != nil {
 		// Template file not found or not readable; use embedded fallback.
-		slog.Warn("report: template file not readable, using fallback",
-			slog.String("path", path),
-			slog.String("error", err.Error()),
-		)
+		log.Warn().
+			Str("path", path).
+			Err(err).
+			Msg("report: template file not readable, using fallback")
 		return template.New("report").Parse(fallback)
 	}
 	return template.New("report").Parse(string(data))

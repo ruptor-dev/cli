@@ -3,7 +3,6 @@ package proxy
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"math/rand"
 	"net"
 	"net/http"
@@ -14,6 +13,7 @@ import (
 
 	"github.com/ruptor-dev/cli/internal/config"
 	"github.com/ruptor-dev/cli/internal/proxy/faults"
+	"github.com/rs/zerolog"
 )
 
 const (
@@ -28,7 +28,7 @@ const (
 type ProxyOption func(*Proxy)
 
 // WithLogger sets a structured logger for the proxy.
-func WithLogger(l *slog.Logger) ProxyOption {
+func WithLogger(l zerolog.Logger) ProxyOption {
 	return func(p *Proxy) {
 		p.logger = l
 	}
@@ -55,7 +55,7 @@ type Proxy struct {
 	registry *faults.FaultRegistry
 	cfg      *config.ProxyConfig
 	tests    []config.TestConfig
-	logger   *slog.Logger
+	logger   zerolog.Logger
 	timeout  time.Duration
 	rng      *rand.Rand
 
@@ -72,7 +72,7 @@ func NewProxy(cfg *config.ProxyConfig, tests []config.TestConfig, registry *faul
 		cfg:      cfg,
 		tests:    tests,
 		registry: registry,
-		logger:   slog.Default(),
+		logger:   zerolog.Nop(),
 		timeout:  defaultTimeout,
 		rng:      rand.New(rand.NewSource(time.Now().UnixNano())),
 	}
@@ -107,10 +107,10 @@ func (p *Proxy) Start(ctx context.Context) error {
 	p.listener = ln
 	p.mu.Unlock()
 
-	p.logger.Info("proxy started",
-		slog.String("addr", ln.Addr().String()),
-		slog.String("passthrough_url", p.cfg.PassthroughURL),
-	)
+	p.logger.Info().
+		Str("addr", ln.Addr().String()).
+		Str("passthrough_url", p.cfg.PassthroughURL).
+		Msg("proxy started")
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -129,9 +129,9 @@ func (p *Proxy) Start(ctx context.Context) error {
 			return fmt.Errorf("proxy: shutdown: %w", err)
 		}
 
-		p.logger.Info("proxy stopped",
-			slog.String("addr", ln.Addr().String()),
-		)
+		p.logger.Info().
+			Str("addr", ln.Addr().String()).
+			Msg("proxy stopped")
 		return nil
 
 	case err := <-errCh:
@@ -141,13 +141,13 @@ func (p *Proxy) Start(ctx context.Context) error {
 
 // Stop performs a graceful shutdown of the proxy server.
 func (p *Proxy) Stop(ctx context.Context) error {
-	p.logger.Info("proxy stopping")
+	p.logger.Info().Msg("proxy stopping")
 
 	if err := p.server.Shutdown(ctx); err != nil {
 		return fmt.Errorf("proxy: stop: %w", err)
 	}
 
-	p.logger.Info("proxy stopped")
+	p.logger.Info().Msg("proxy stopped")
 	return nil
 }
 
@@ -166,7 +166,7 @@ func (p *Proxy) Addr() string {
 // listenWithFallback opens a TCP listener, auto-incrementing the port when
 // the requested one is already in use. A port of 0 is passed through
 // unchanged (OS-assigned). See ADR-008.
-func listenWithFallback(startPort int, logger *slog.Logger) (net.Listener, error) {
+func listenWithFallback(startPort int, logger zerolog.Logger) (net.Listener, error) {
 	if startPort == 0 {
 		ln, err := net.Listen("tcp", ":0")
 		if err != nil {
@@ -182,10 +182,10 @@ func listenWithFallback(startPort int, logger *slog.Logger) (net.Listener, error
 		ln, err := net.Listen("tcp", addr)
 		if err == nil {
 			if offset > 0 {
-				logger.Warn("proxy: requested port busy, using fallback",
-					slog.Int("requested", startPort),
-					slog.Int("bound", port),
-				)
+				logger.Warn().
+					Int("requested", startPort).
+					Int("bound", port).
+					Msg("proxy: requested port busy, using fallback")
 			}
 			return ln, nil
 		}

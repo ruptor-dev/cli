@@ -3,11 +3,11 @@ package simulate
 import (
 	"context"
 	"errors"
-	"log/slog"
 	"net/http"
 	"testing"
 
 	"github.com/ruptor-dev/cli/internal/config"
+	"github.com/ruptor-dev/cli/internal/ui"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -40,7 +40,7 @@ func (g *scriptedGoalChecker) Check(_ context.Context, _, _, _ string) (bool, er
 }
 
 func TestSimulatorRun(t *testing.T) {
-	logger := slog.Default()
+	logger := ui.SilentLogger()
 
 	tests := []struct {
 		name         string
@@ -123,7 +123,7 @@ func TestSimulatorRun_GoalCheckErrorDoesNotAbort(t *testing.T) {
 	// continues, logging a warning; the run ends naturally at max_turns.
 	stub := &stubLLMClient{responses: []string{"hello", "response"}}
 	goal := &scriptedGoalChecker{err: errors.New("llm down")}
-	sim := NewSimulatorFromBaseURL(stub, http.DefaultClient, slog.Default(), "", 30).
+	sim := NewSimulatorFromBaseURL(stub, http.DefaultClient, ui.SilentLogger(), "", 30).
 		WithGoalChecker(goal)
 
 	result, err := sim.Run(context.Background(), config.Simulation{
@@ -144,7 +144,7 @@ func TestSimulatorRun_ContextCancellation(t *testing.T) {
 	cancel() // Cancel immediately.
 
 	stub := &stubLLMClient{responses: []string{"hello", "world"}}
-	sim := NewSimulatorFromBaseURL(stub, http.DefaultClient, slog.Default(), "http://localhost:3000", 30)
+	sim := NewSimulatorFromBaseURL(stub, http.DefaultClient, ui.SilentLogger(), "http://localhost:3000", 30)
 
 	result, err := sim.Run(ctx, config.Simulation{
 		ID:              "cancel-test",

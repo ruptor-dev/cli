@@ -1,17 +1,16 @@
 package proxy
 
 import (
-	"io"
-	"log/slog"
 	"net"
 	"testing"
 
+	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func silentLogger() *slog.Logger {
-	return slog.New(slog.NewTextHandler(io.Discard, nil))
+func silentLogger() zerolog.Logger {
+	return zerolog.Nop()
 }
 
 func TestListenWithFallback_OSAssigned(t *testing.T) {

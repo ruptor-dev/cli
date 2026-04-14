@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log/slog"
 	"net/http"
 	"os"
 	"strconv"
@@ -18,6 +17,7 @@ import (
 
 	"github.com/ruptor-dev/cli/internal/config"
 	"github.com/ruptor-dev/cli/pkg/types"
+	"github.com/rs/zerolog"
 )
 
 // LLMClient abstracts the language model used for generating simulated user
@@ -31,7 +31,7 @@ type LLMClient interface {
 type Simulator struct {
 	llmClient   LLMClient
 	httpClient  *http.Client
-	logger      *slog.Logger
+	logger      zerolog.Logger
 	agent       config.SimAgentConfig
 	runID       string
 	goalChecker GoalChecker
@@ -41,7 +41,7 @@ type Simulator struct {
 // configuration is captured by value so that a single Simulator instance
 // serves one configured run. Goal detection defaults to an LLM-backed
 // checker that reuses llmClient; override with WithGoalChecker.
-func NewSimulator(llmClient LLMClient, httpClient *http.Client, logger *slog.Logger, agent config.SimAgentConfig) *Simulator {
+func NewSimulator(llmClient LLMClient, httpClient *http.Client, logger zerolog.Logger, agent config.SimAgentConfig) *Simulator {
 	return &Simulator{
 		llmClient:   llmClient,
 		httpClient:  httpClient,
@@ -63,7 +63,7 @@ func (s *Simulator) WithGoalChecker(c GoalChecker) *Simulator {
 // NewSimulatorFromBaseURL is a compatibility wrapper matching the original
 // (baseURL, timeoutS) signature. Used by tests that exercise the LLM fallback
 // path without building a full SimAgentConfig.
-func NewSimulatorFromBaseURL(llmClient LLMClient, httpClient *http.Client, logger *slog.Logger, baseURL string, timeoutS int) *Simulator {
+func NewSimulatorFromBaseURL(llmClient LLMClient, httpClient *http.Client, logger zerolog.Logger, baseURL string, timeoutS int) *Simulator {
 	return NewSimulator(llmClient, httpClient, logger, config.SimAgentConfig{
 		BaseURL:         baseURL,
 		RequestTimeoutS: timeoutS,
@@ -96,11 +96,11 @@ func (s *Simulator) Run(ctx context.Context, sim config.Simulation) (*types.Simu
 		}
 		history.Add("user", userMsg)
 
-		s.logger.Debug("simulated user message",
-			slog.String("simulation_id", sim.ID),
-			slog.String("session_id", sessionID),
-			slog.Int("turn", turn+1),
-		)
+		s.logger.Debug().
+			Str("simulation_id", sim.ID).
+			Str("session_id", sessionID).
+			Int("turn", turn+1).
+			Msg("simulated user message")
 
 		if err := ctx.Err(); err != nil {
 			return nil, fmt.Errorf("simulate: running %s: %w", sim.ID, err)
@@ -112,20 +112,20 @@ func (s *Simulator) Run(ctx context.Context, sim config.Simulation) (*types.Simu
 		}
 		history.Add("assistant", agentResp)
 
-		s.logger.Debug("agent response",
-			slog.String("simulation_id", sim.ID),
-			slog.String("session_id", sessionID),
-			slog.Int("turn", turn+1),
-		)
+		s.logger.Debug().
+			Str("simulation_id", sim.ID).
+			Str("session_id", sessionID).
+			Int("turn", turn+1).
+			Msg("agent response")
 
 		turnCount = turn + 1
 
 		reached, err := s.goalChecker.Check(ctx, agentResp, sim.Goal, sim.SuccessCriteria)
 		if err != nil {
-			s.logger.Warn("simulate: goal check failed",
-				slog.String("simulation_id", sim.ID),
-				slog.String("error", err.Error()),
-			)
+			s.logger.Warn().
+				Str("simulation_id", sim.ID).
+				Err(err).
+				Msg("simulate: goal check failed")
 		}
 		if reached {
 			goalReached = true

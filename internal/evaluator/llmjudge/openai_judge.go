@@ -4,24 +4,24 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"strings"
 
 	"github.com/ruptor-dev/cli/internal/evaluator/llmjudge/prompts"
 	"github.com/ruptor-dev/cli/internal/llmclient"
 	"github.com/ruptor-dev/cli/pkg/types"
+	"github.com/rs/zerolog"
 )
 
 // OpenAIJudge evaluates agent behavior using the OpenAI chat completions API.
 // Transport, auth, and HTTP error handling are delegated to llmclient.OpenAIClient.
 type OpenAIJudge struct {
 	client *llmclient.OpenAIClient
-	logger *slog.Logger
+	logger zerolog.Logger
 }
 
 // NewOpenAIJudge creates a new OpenAI-backed judge.
 // If model is empty, defaults to llmclient.DefaultModel.
-func NewOpenAIJudge(apiKey, model string, logger *slog.Logger) *OpenAIJudge {
+func NewOpenAIJudge(apiKey, model string, logger zerolog.Logger) *OpenAIJudge {
 	return &OpenAIJudge{
 		client: llmclient.New(apiKey, model, llmclient.WithLogger(logger)),
 		logger: logger,
@@ -30,14 +30,14 @@ func NewOpenAIJudge(apiKey, model string, logger *slog.Logger) *OpenAIJudge {
 
 // NewOpenAIJudgeWithClient wires a judge to a caller-provided client. Useful
 // when the caller wants to share a single client across multiple components.
-func NewOpenAIJudgeWithClient(client *llmclient.OpenAIClient, logger *slog.Logger) *OpenAIJudge {
+func NewOpenAIJudgeWithClient(client *llmclient.OpenAIClient, logger zerolog.Logger) *OpenAIJudge {
 	return &OpenAIJudge{client: client, logger: logger}
 }
 
 func (j *OpenAIJudge) EvaluateChaos(ctx context.Context, prompt, agentBehavior string) (string, string, error) {
-	j.logger.Debug("evaluating chaos behavior with LLM judge",
-		slog.String("model", j.client.Model()),
-	)
+	j.logger.Debug().
+		Str("model", j.client.Model()).
+		Msg("evaluating chaos behavior with LLM judge")
 
 	systemMsg := prompts.ChaosSystem
 	if prompt != "" {
@@ -59,10 +59,10 @@ func (j *OpenAIJudge) EvaluateChaos(ctx context.Context, prompt, agentBehavior s
 }
 
 func (j *OpenAIJudge) EvaluateConversation(ctx context.Context, prompt string, history *types.ConversationHistory) (int, []string, error) {
-	j.logger.Debug("evaluating conversation with LLM judge",
-		slog.String("model", j.client.Model()),
-		slog.Int("turns", len(history.Turns)),
-	)
+	j.logger.Debug().
+		Str("model", j.client.Model()).
+		Int("turns", len(history.Turns)).
+		Msg("evaluating conversation with LLM judge")
 
 	systemMsg := prompts.ConversationSystem
 	if prompt != "" {
@@ -127,7 +127,6 @@ func parseConversationResponse(content string) (int, []string, error) {
 		Issues []string `json:"issues"`
 	}
 
-	// Try to find JSON in the response (it might be wrapped in markdown code blocks).
 	jsonStr := content
 	if idx := strings.Index(content, "{"); idx >= 0 {
 		if end := strings.LastIndex(content, "}"); end > idx {

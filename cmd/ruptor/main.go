@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -22,6 +21,7 @@ import (
 	"github.com/ruptor-dev/cli/internal/simulate"
 	"github.com/ruptor-dev/cli/internal/ui"
 	"github.com/ruptor-dev/cli/pkg/types"
+	"github.com/rs/zerolog"
 	"github.com/spf13/cobra"
 )
 
@@ -34,19 +34,25 @@ func main() {
 	}
 }
 
+// rootLogger is the process-wide zerolog logger. Replaces the previous
+// slog default. Initialised in PersistentPreRun so --verbose / --quiet
+// flags (added in a later PR) can tune the level.
+var rootLogger = ui.SilentLogger()
+
 func newRootCmd() *cobra.Command {
+	var logLevel string
+
 	cmd := &cobra.Command{
 		Use:   "ruptor",
 		Short: "Ruptor - chaos testing and simulation for AI agents",
 		PersistentPreRun: func(cmd *cobra.Command, args []string) {
-			logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
-				Level: slog.LevelInfo,
-			}))
-			slog.SetDefault(logger)
+			rootLogger = ui.NewLogger(ui.LogLevel(logLevel))
 		},
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
+
+	cmd.PersistentFlags().StringVar(&logLevel, "log-level", "info", "log level: debug, info, warn, error")
 
 	cmd.AddCommand(newRunCmd())
 	cmd.AddCommand(newSimulateCmd())
@@ -80,29 +86,18 @@ func newRunCmd() *cobra.Command {
 }
 
 func runChaos(ctx context.Context, cfgPath, outputPath, testFilter string) error {
-	logger := slog.Default()
+	logger := rootLogger
 
 	cfg, err := config.LoadChaos(cfgPath)
 	if err != nil {
 		return fmt.Errorf("loading config: %w", err)
 	}
 
-	// Filter tests if --test is set.
-	tests := cfg.Tests
-	if testFilter != "" {
-		var filtered []config.TestConfig
-		for _, t := range tests {
-			if t.ID == testFilter {
-				filtered = append(filtered, t)
-			}
-		}
-		if len(filtered) == 0 {
-			return fmt.Errorf("no test found with id %q", testFilter)
-		}
-		tests = filtered
+	tests, err := filterTests(cfg.Tests, testFilter)
+	if err != nil {
+		return err
 	}
 
-	// Build dependencies.
 	registry := faults.NewFaultRegistry()
 
 	judge, err := buildJudge(cfg.Evaluation.LLMJudge, logger)
@@ -120,9 +115,64 @@ func runChaos(ctx context.Context, cfgPath, outputPath, testFilter string) error
 		proxy.WithTimeout(time.Duration(cfg.Proxy.RequestTimeoutS)*time.Second),
 	)
 
-	// Determine output format and path.
-	format := cfg.Output.Format
-	path := cfg.Output.Path
+	renderer := rendererFor(cfg.Output, outputPath)
+
+	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	proxyErrCh := make(chan error, 1)
+	go func() {
+		proxyErrCh <- p.Start(ctx)
+	}()
+
+	logger.Info().
+		Str("agent", cfg.Agent.Name).
+		Int("tests", len(tests)).
+		Int("port", cfg.Proxy.Port).
+		Msg("ruptor chaos proxy starting")
+
+	if err := waitForProxy(ctx, proxyErrCh, logger); err != nil {
+		return err
+	}
+
+	rpt, err := buildChaosReport(context.Background(), eval, cfg, tests, p.Observations(), logger)
+	if err != nil {
+		return err
+	}
+
+	if err := renderer.RenderChaos(rpt); err != nil {
+		return fmt.Errorf("rendering chaos report: %w", err)
+	}
+
+	logger.Info().
+		Int("total", rpt.TotalTests).
+		Int("passed", rpt.Passed).
+		Int("failed", rpt.Failed).
+		Int("score", rpt.Score).
+		Msg("chaos run complete")
+
+	return nil
+}
+
+func filterTests(tests []config.TestConfig, filter string) ([]config.TestConfig, error) {
+	if filter == "" {
+		return tests, nil
+	}
+	var out []config.TestConfig
+	for _, t := range tests {
+		if t.ID == filter {
+			out = append(out, t)
+		}
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("no test found with id %q", filter)
+	}
+	return out, nil
+}
+
+func rendererFor(outCfg config.OutputConfig, outputPath string) report.Renderer {
+	format := outCfg.Format
+	path := outCfg.Path
 	if outputPath != "" {
 		path = outputPath
 		ext := strings.ToLower(filepath.Ext(outputPath))
@@ -135,30 +185,13 @@ func runChaos(ctx context.Context, cfgPath, outputPath, testFilter string) error
 			format = "html"
 		}
 	}
-	renderer := report.NewRendererFromFormat(format, path)
+	return report.NewRendererFromFormat(format, path)
+}
 
-	// Set up graceful shutdown.
-	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
-	// Start proxy in background.
-	proxyErrCh := make(chan error, 1)
-	go func() {
-		proxyErrCh <- p.Start(ctx)
-	}()
-
-	logger.Info("ruptor chaos proxy starting",
-		slog.String("agent", cfg.Agent.Name),
-		slog.Int("tests", len(tests)),
-		slog.Int("port", cfg.Proxy.Port),
-	)
-
-	// Block until the user stops the run (Ctrl-C) or the proxy exits.
-	// The user drives their own agent against the proxy; on ctx.Done we
-	// drain the observations into a ReliabilityReport.
+func waitForProxy(ctx context.Context, proxyErrCh chan error, logger zerolog.Logger) error {
 	select {
 	case <-ctx.Done():
-		logger.Info("shutting down; waiting for proxy to stop")
+		logger.Info().Msg("shutting down; waiting for proxy to stop")
 		if err := <-proxyErrCh; err != nil {
 			return fmt.Errorf("proxy error: %w", err)
 		}
@@ -167,23 +200,6 @@ func runChaos(ctx context.Context, cfgPath, outputPath, testFilter string) error
 			return fmt.Errorf("proxy error: %w", err)
 		}
 	}
-
-	rpt, err := buildChaosReport(context.Background(), eval, cfg, tests, p.Observations(), logger)
-	if err != nil {
-		return err
-	}
-
-	if err := renderer.RenderChaos(rpt); err != nil {
-		return fmt.Errorf("rendering chaos report: %w", err)
-	}
-
-	logger.Info("chaos run complete",
-		slog.Int("total", rpt.TotalTests),
-		slog.Int("passed", rpt.Passed),
-		slog.Int("failed", rpt.Failed),
-		slog.Int("score", rpt.Score),
-	)
-
 	return nil
 }
 
@@ -196,38 +212,13 @@ func buildChaosReport(
 	cfg *config.ChaosConfig,
 	tests []config.TestConfig,
 	obs map[string]proxy.Observation,
-	logger *slog.Logger,
+	logger zerolog.Logger,
 ) (*types.ReliabilityReport, error) {
 	results := make([]types.TestResult, 0, len(tests))
 	passed, failed := 0, 0
 
 	for _, t := range tests {
-		o := obs[t.ID]
-		r, err := eval.Evaluate(
-			ctx,
-			t.ID,
-			t.Fault,
-			t.Tool,
-			o.LastStatusCode,
-			o.Hits,
-			o.HadError,
-			false, // Recovered — wire when retry-aware proxy lands
-			cfg.Evaluation.LLMJudgePrompt,
-			"",    // agent behavior transcript — collected in a later PR
-		)
-		if err != nil {
-			logger.Warn("chaos evaluator failed",
-				slog.String("test_id", t.ID),
-				slog.String("error", err.Error()),
-			)
-			r = &types.TestResult{
-				TestID:    t.ID,
-				FaultType: t.Fault,
-				Tool:      t.Tool,
-				Passed:    false,
-				Error:     err.Error(),
-			}
-		}
+		r := evaluateTest(ctx, eval, t, obs[t.ID], cfg.Evaluation.LLMJudgePrompt, logger)
 		if r.Passed {
 			passed++
 		} else {
@@ -254,6 +245,42 @@ func buildChaosReport(
 	}, nil
 }
 
+func evaluateTest(
+	ctx context.Context,
+	eval *evaluator.ChaosEvaluator,
+	t config.TestConfig,
+	o proxy.Observation,
+	judgePrompt string,
+	logger zerolog.Logger,
+) *types.TestResult {
+	r, err := eval.Evaluate(
+		ctx,
+		t.ID,
+		t.Fault,
+		t.Tool,
+		o.LastStatusCode,
+		o.Hits,
+		o.HadError,
+		false, // Recovered — wired when retry-aware proxy lands
+		judgePrompt,
+		"", // agent behavior transcript — collected in a later PR
+	)
+	if err != nil {
+		logger.Warn().
+			Str("test_id", t.ID).
+			Err(err).
+			Msg("chaos evaluator failed")
+		return &types.TestResult{
+			TestID:    t.ID,
+			FaultType: t.Fault,
+			Tool:      t.Tool,
+			Passed:    false,
+			Error:     err.Error(),
+		}
+	}
+	return r
+}
+
 // ---------------------------------------------------------------------------
 // simulate command
 // ---------------------------------------------------------------------------
@@ -278,29 +305,18 @@ func newSimulateCmd() *cobra.Command {
 }
 
 func runSimulate(ctx context.Context, cfgPath, outputPath, simFilter string) error {
-	logger := slog.Default()
+	logger := rootLogger
 
 	cfg, err := config.LoadSimulate(cfgPath)
 	if err != nil {
 		return fmt.Errorf("loading config: %w", err)
 	}
 
-	// Filter simulations if --sim is set.
-	sims := cfg.Simulations
-	if simFilter != "" {
-		var filtered []config.Simulation
-		for _, s := range sims {
-			if s.ID == simFilter {
-				filtered = append(filtered, s)
-			}
-		}
-		if len(filtered) == 0 {
-			return fmt.Errorf("no simulation found with id %q", simFilter)
-		}
-		sims = filtered
+	sims, err := filterSimulations(cfg.Simulations, simFilter)
+	if err != nil {
+		return err
 	}
 
-	// Build dependencies.
 	apiKey := os.Getenv("OPENAI_API_KEY")
 	if apiKey == "" {
 		return fmt.Errorf("OPENAI_API_KEY environment variable is required for simulations")
@@ -310,6 +326,7 @@ func runSimulate(ctx context.Context, cfgPath, outputPath, simFilter string) err
 		client: llmclient.New(apiKey, "",
 			llmclient.WithHTTPClient(&http.Client{Timeout: 120 * time.Second}),
 			llmclient.WithLogger(logger),
+			llmclient.WithRetry(),
 		),
 	}
 
@@ -324,72 +341,107 @@ func runSimulate(ctx context.Context, cfgPath, outputPath, simFilter string) err
 	}
 	sim := simulate.NewSimulator(llmClient, &http.Client{Timeout: 60 * time.Second}, logger, cfg.Agent)
 
-	// Determine output format and path.
-	format := cfg.Output.Format
-	path := cfg.Output.Path
-	if outputPath != "" {
-		path = outputPath
-		ext := strings.ToLower(filepath.Ext(outputPath))
-		switch ext {
-		case ".html":
-			format = "html"
-		case ".json":
-			format = "json"
-		default:
-			format = "html"
-		}
-	}
-	renderer := report.NewRendererFromFormat(format, path)
+	renderer := rendererFor(cfg.Output, outputPath)
 
-	// Set up graceful shutdown.
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	logger.Info("ruptor simulation starting",
-		slog.String("agent", cfg.Agent.Name),
-		slog.Int("simulations", len(sims)),
-	)
+	logger.Info().
+		Str("agent", cfg.Agent.Name).
+		Int("simulations", len(sims)).
+		Msg("ruptor simulation starting")
 
-	// Run each simulation.
+	results, err := runSimulations(ctx, sims, sim, simEval, cfg.Evaluation.LLMJudgePrompt, logger)
+	if err != nil {
+		return err
+	}
+
+	rpt := buildSimulateReport(cfg, results)
+
+	if err := renderer.RenderSimulate(rpt); err != nil {
+		return fmt.Errorf("rendering report: %w", err)
+	}
+
+	logger.Info().
+		Int("total", len(results)).
+		Int("goal_reached", rpt.GoalReached).
+		Float64("avg_score", rpt.AvgScore).
+		Msg("simulation complete")
+
+	return nil
+}
+
+func filterSimulations(sims []config.Simulation, filter string) ([]config.Simulation, error) {
+	if filter == "" {
+		return sims, nil
+	}
+	var out []config.Simulation
+	for _, s := range sims {
+		if s.ID == filter {
+			out = append(out, s)
+		}
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("no simulation found with id %q", filter)
+	}
+	return out, nil
+}
+
+func runSimulations(
+	ctx context.Context,
+	sims []config.Simulation,
+	sim *simulate.Simulator,
+	simEval *evaluator.SimulateEvaluator,
+	judgePrompt string,
+	logger zerolog.Logger,
+) ([]types.SimulationResult, error) {
 	var results []types.SimulationResult
 	for _, s := range sims {
 		if err := ctx.Err(); err != nil {
-			return fmt.Errorf("cancelled: %w", err)
+			return nil, fmt.Errorf("cancelled: %w", err)
 		}
 
-		logger.Info("running simulation", slog.String("id", s.ID), slog.String("persona", s.Persona))
+		logger.Info().
+			Str("id", s.ID).
+			Str("persona", s.Persona).
+			Msg("running simulation")
 
 		result, err := sim.Run(ctx, s)
 		if err != nil {
-			return fmt.Errorf("simulation %s: %w", s.ID, err)
+			return nil, fmt.Errorf("simulation %s: %w", s.ID, err)
 		}
 
-		// Evaluate the simulation if judge prompt is configured.
-		if cfg.Evaluation.LLMJudgePrompt != "" {
-			history := result.History
-			if history == nil {
-				history = &types.ConversationHistory{}
-			}
-			evalResult, err := simEval.Evaluate(
-				ctx,
-				s.ID,
-				s.Persona,
-				s.Goal,
-				history,
-				cfg.Evaluation.LLMJudgePrompt,
-			)
-			if err != nil {
-				logger.Warn("evaluation failed", slog.String("id", s.ID), slog.String("error", err.Error()))
-			} else {
-				result.QualityScore = evalResult.QualityScore
-				result.Issues = evalResult.Issues
-			}
+		if judgePrompt != "" {
+			applyEvaluation(ctx, simEval, s, result, judgePrompt, logger)
 		}
 
 		results = append(results, *result)
 	}
+	return results, nil
+}
 
-	// Build and render report.
+func applyEvaluation(
+	ctx context.Context,
+	simEval *evaluator.SimulateEvaluator,
+	s config.Simulation,
+	result *types.SimulationResult,
+	judgePrompt string,
+	logger zerolog.Logger,
+) {
+	history := result.History
+	if history == nil {
+		history = &types.ConversationHistory{}
+	}
+	evalResult, err := simEval.Evaluate(ctx, s.ID, s.Persona, s.Goal, history, judgePrompt)
+	if err != nil {
+		logger.Warn().Str("id", s.ID).Err(err).Msg("evaluation failed")
+		return
+	}
+	result.QualityScore = evalResult.QualityScore
+	result.Issues = evalResult.Issues
+}
+
+func buildSimulateReport(cfg *config.SimulateConfig, results []types.SimulationResult) *types.ConversationReport {
 	goalReached := 0
 	var totalScore float64
 	for _, r := range results {
@@ -403,7 +455,7 @@ func runSimulate(ctx context.Context, cfgPath, outputPath, simFilter string) err
 		avgScore = totalScore / float64(len(results))
 	}
 
-	rpt := &types.ConversationReport{
+	return &types.ConversationReport{
 		SchemaVersion: types.ReportSchemaVersion,
 		RuptorVersion: version,
 		AgentName:     cfg.Agent.Name,
@@ -413,18 +465,6 @@ func runSimulate(ctx context.Context, cfgPath, outputPath, simFilter string) err
 		AvgScore:      avgScore,
 		Results:       results,
 	}
-
-	if err := renderer.RenderSimulate(rpt); err != nil {
-		return fmt.Errorf("rendering report: %w", err)
-	}
-
-	logger.Info("simulation complete",
-		slog.Int("total", len(results)),
-		slog.Int("goal_reached", goalReached),
-		slog.Float64("avg_score", avgScore),
-	)
-
-	return nil
 }
 
 // ---------------------------------------------------------------------------
@@ -443,16 +483,16 @@ func newValidateCmd() *cobra.Command {
 }
 
 func runValidate(cfgPath string) error {
-	logger := slog.Default()
+	logger := rootLogger
 	_, chaosErr := config.LoadChaos(cfgPath)
 	if chaosErr == nil {
-		logger.Info("config valid", slog.String("type", "chaos"))
+		logger.Info().Str("type", "chaos").Msg("config valid")
 		return nil
 	}
 
 	_, simErr := config.LoadSimulate(cfgPath)
 	if simErr == nil {
-		logger.Info("config valid", slog.String("type", "simulate"))
+		logger.Info().Str("type", "simulate").Msg("config valid")
 		return nil
 	}
 
@@ -477,25 +517,19 @@ func newVersionCmd() *cobra.Command {
 // helpers
 // ---------------------------------------------------------------------------
 
-// buildJudge creates the appropriate LLM judge based on configuration.
-func buildJudge(useLLM bool, logger *slog.Logger) (llmjudge.Judge, error) {
+func buildJudge(useLLM bool, logger zerolog.Logger) (llmjudge.Judge, error) {
 	if !useLLM {
 		return &llmjudge.NoopJudge{}, nil
 	}
 
 	apiKey := os.Getenv("OPENAI_API_KEY")
 	if apiKey == "" {
-		logger.Warn("OPENAI_API_KEY not set, using noop judge")
+		logger.Warn().Msg("OPENAI_API_KEY not set, using noop judge")
 		return &llmjudge.NoopJudge{}, nil
 	}
 
 	return llmjudge.NewOpenAIJudge(apiKey, "", logger), nil
 }
-
-// ---------------------------------------------------------------------------
-// simulateLLMAdapter bridges simulate.LLMClient (map-shaped messages) to the
-// shared llmclient.OpenAIClient.
-// ---------------------------------------------------------------------------
 
 type simulateLLMAdapter struct {
 	client *llmclient.OpenAIClient

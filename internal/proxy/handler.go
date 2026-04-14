@@ -2,7 +2,6 @@ package proxy
 
 import (
 	"fmt"
-	"log/slog"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -33,8 +32,8 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // matchTest finds the first TestConfig whose Tool matches the request path.
-// Note: matching is exact (not prefix/wildcard). Tool paths must match request paths exactly.
-// For example, "/search" matches "/search" but not "/search?q=test" or "/search/order/123".
+// Matching is exact (not prefix/wildcard). "/search" matches "/search" but
+// not "/search?q=test" or "/search/order/123".
 func (p *Proxy) matchTest(path string) (config.TestConfig, bool) {
 	for _, t := range p.tests {
 		if t.Tool == path {
@@ -68,29 +67,29 @@ func (p *Proxy) injectFault(w http.ResponseWriter, r *http.Request, t config.Tes
 
 	fault, err := p.registry.Build(t.Fault, cfg)
 	if err != nil {
-		p.logger.Error("proxy: build fault",
-			slog.String("fault_type", string(t.Fault)),
-			slog.String("tool", t.Tool),
-			slog.String("test_id", t.ID),
-			slog.String("error", err.Error()),
-		)
+		p.logger.Error().
+			Str("fault_type", string(t.Fault)).
+			Str("tool", t.Tool).
+			Str("test_id", t.ID).
+			Err(err).
+			Msg("proxy: build fault")
 		http.Error(w, "internal proxy error", http.StatusInternalServerError)
 		return
 	}
 
-	p.logger.Info("proxy: injecting fault",
-		slog.String("fault_type", string(t.Fault)),
-		slog.String("tool", t.Tool),
-		slog.String("test_id", t.ID),
-	)
+	p.logger.Info().
+		Str("fault_type", string(t.Fault)).
+		Str("tool", t.Tool).
+		Str("test_id", t.ID).
+		Msg("proxy: injecting fault")
 
 	if err := fault.Inject(w, r); err != nil {
-		p.logger.Error("proxy: inject fault",
-			slog.String("fault_type", string(t.Fault)),
-			slog.String("tool", t.Tool),
-			slog.String("test_id", t.ID),
-			slog.String("error", err.Error()),
-		)
+		p.logger.Error().
+			Str("fault_type", string(t.Fault)).
+			Str("tool", t.Tool).
+			Str("test_id", t.ID).
+			Err(err).
+			Msg("proxy: inject fault")
 	}
 }
 
@@ -127,16 +126,12 @@ func (p *Proxy) reverseProxy() (*httputil.ReverseProxy, error) {
 func (p *Proxy) passthrough(w http.ResponseWriter, r *http.Request, testID string) {
 	rp, err := p.reverseProxy()
 	if err != nil {
-		p.logger.Error("proxy: passthrough setup",
-			slog.String("error", err.Error()),
-		)
+		p.logger.Error().Err(err).Msg("proxy: passthrough setup")
 		http.Error(w, "bad gateway", http.StatusBadGateway)
 		return
 	}
 
-	p.logger.Info("proxy: passthrough",
-		slog.String("path", r.URL.Path),
-	)
+	p.logger.Info().Str("path", r.URL.Path).Msg("proxy: passthrough")
 
 	rp.ServeHTTP(w, r)
 

@@ -3,11 +3,11 @@ package evaluator
 import (
 	"context"
 	"fmt"
-	"log/slog"
 
 	"github.com/ruptor-dev/cli/internal/evaluator/llmjudge"
 	"github.com/ruptor-dev/cli/internal/evaluator/rules"
 	"github.com/ruptor-dev/cli/pkg/types"
+	"github.com/rs/zerolog"
 )
 
 // ChaosEvaluator evaluates agent behavior during chaos testing using
@@ -15,13 +15,13 @@ import (
 type ChaosEvaluator struct {
 	judge     llmjudge.Judge
 	detectors []rules.Detector
-	logger    *slog.Logger
+	logger    zerolog.Logger
 }
 
-// NewChaosEvaluator creates a new ChaosEvaluator with the given judge and configuration.
-// The default detector set (loop, crash, recovery) is installed; use
-// NewChaosEvaluatorWithDetectors to supply a custom set.
-func NewChaosEvaluator(judge llmjudge.Judge, maxIterations int, logger *slog.Logger) *ChaosEvaluator {
+// NewChaosEvaluator creates a new ChaosEvaluator with the given judge and
+// configuration. The default detector set (loop, crash, recovery) is
+// installed; use NewChaosEvaluatorWithDetectors to supply a custom set.
+func NewChaosEvaluator(judge llmjudge.Judge, maxIterations int, logger zerolog.Logger) *ChaosEvaluator {
 	return NewChaosEvaluatorWithDetectors(judge, logger, []rules.Detector{
 		&rules.LoopDetector{MaxIterations: maxIterations},
 		&rules.CrashDetector{},
@@ -32,7 +32,7 @@ func NewChaosEvaluator(judge llmjudge.Judge, maxIterations int, logger *slog.Log
 // NewChaosEvaluatorWithDetectors creates a ChaosEvaluator with an explicit
 // detector set. Useful for tests and for callers that want to add custom
 // detectors (e.g. repetition, tone).
-func NewChaosEvaluatorWithDetectors(judge llmjudge.Judge, logger *slog.Logger, detectors []rules.Detector) *ChaosEvaluator {
+func NewChaosEvaluatorWithDetectors(judge llmjudge.Judge, logger zerolog.Logger, detectors []rules.Detector) *ChaosEvaluator {
 	return &ChaosEvaluator{
 		judge:     judge,
 		detectors: detectors,
@@ -51,13 +51,42 @@ func (e *ChaosEvaluator) Evaluate(
 	hadError, recovered bool,
 	prompt, agentBehavior string,
 ) (*types.TestResult, error) {
-	e.logger.Info("evaluating chaos test",
-		slog.String("test_id", testID),
-		slog.String("fault_type", string(faultType)),
-		slog.String("tool", tool),
-	)
+	e.logger.Info().
+		Str("test_id", testID).
+		Str("fault_type", string(faultType)).
+		Str("tool", tool).
+		Msg("evaluating chaos test")
 
-	// Run rule-based detectors.
+	behaviors := e.runDetectors(iterations, statusCode, hadError, recovered)
+
+	verdict, reason, err := e.runJudge(ctx, prompt, agentBehavior)
+	if err != nil {
+		return nil, err
+	}
+
+	passed := !containsCrash(behaviors) && (verdict == "PASS" || verdict == "SKIPPED")
+
+	result := &types.TestResult{
+		TestID:            testID,
+		FaultType:         faultType,
+		Tool:              tool,
+		Passed:            passed,
+		DetectedBehaviors: behaviors,
+		LLMJudgeVerdict:   verdict,
+		LLMJudgeReason:    reason,
+	}
+
+	e.logger.Info().
+		Str("test_id", testID).
+		Bool("passed", passed).
+		Str("verdict", verdict).
+		Int("behaviors", len(behaviors)).
+		Msg("chaos evaluation complete")
+
+	return result, nil
+}
+
+func (e *ChaosEvaluator) runDetectors(iterations, statusCode int, hadError, recovered bool) []types.DetectedBehavior {
 	input := rules.DetectionInput{
 		Iterations: iterations,
 		StatusCode: statusCode,
@@ -70,75 +99,56 @@ func (e *ChaosEvaluator) Evaluate(
 			behaviors = append(behaviors, b...)
 		}
 	}
+	return behaviors
+}
 
-	// Run LLM judge if prompt is provided.
-	var verdict, reason string
-	if prompt != "" {
-		var err error
-		verdict, reason, err = e.judge.EvaluateChaos(ctx, prompt, agentBehavior)
-		if err != nil {
-			return nil, fmt.Errorf("evaluator: running LLM judge: %w", err)
-		}
-	} else {
-		verdict = "SKIPPED"
+func (e *ChaosEvaluator) runJudge(ctx context.Context, prompt, agentBehavior string) (verdict, reason string, err error) {
+	if prompt == "" {
+		return "SKIPPED", "", nil
 	}
+	v, r, err := e.judge.EvaluateChaos(ctx, prompt, agentBehavior)
+	if err != nil {
+		return "", "", fmt.Errorf("evaluator: running LLM judge: %w", err)
+	}
+	return v, r, nil
+}
 
-	// Determine pass/fail: no crash behaviors and verdict is PASS or SKIPPED.
-	hasCrash := false
+func containsCrash(behaviors []types.DetectedBehavior) bool {
 	for _, b := range behaviors {
 		if b == types.BehaviorCrash {
-			hasCrash = true
-			break
+			return true
 		}
 	}
-	passed := !hasCrash && (verdict == "PASS" || verdict == "SKIPPED")
-
-	result := &types.TestResult{
-		TestID:            testID,
-		FaultType:         faultType,
-		Tool:              tool,
-		Passed:            passed,
-		DetectedBehaviors: behaviors,
-		LLMJudgeVerdict:   verdict,
-		LLMJudgeReason:    reason,
-	}
-
-	e.logger.Info("chaos evaluation complete",
-		slog.String("test_id", testID),
-		slog.Bool("passed", passed),
-		slog.String("verdict", verdict),
-		slog.Int("behaviors", len(behaviors)),
-	)
-
-	return result, nil
+	return false
 }
 
 // SimulateEvaluator evaluates conversation simulations using an LLM judge.
 type SimulateEvaluator struct {
 	judge  llmjudge.Judge
-	logger *slog.Logger
+	logger zerolog.Logger
 }
 
 // NewSimulateEvaluator creates a new SimulateEvaluator with the given judge.
-func NewSimulateEvaluator(judge llmjudge.Judge, logger *slog.Logger) *SimulateEvaluator {
+func NewSimulateEvaluator(judge llmjudge.Judge, logger zerolog.Logger) *SimulateEvaluator {
 	return &SimulateEvaluator{
 		judge:  judge,
 		logger: logger,
 	}
 }
 
-// Evaluate runs the LLM judge on a conversation simulation and assembles a SimulationResult.
+// Evaluate runs the LLM judge on a conversation simulation and assembles
+// a SimulationResult.
 func (e *SimulateEvaluator) Evaluate(
 	ctx context.Context,
 	simID, persona, goal string,
 	history *types.ConversationHistory,
 	prompt string,
 ) (*types.SimulationResult, error) {
-	e.logger.Info("evaluating conversation simulation",
-		slog.String("sim_id", simID),
-		slog.String("persona", persona),
-		slog.Int("turns", len(history.Turns)),
-	)
+	e.logger.Info().
+		Str("sim_id", simID).
+		Str("persona", persona).
+		Int("turns", len(history.Turns)).
+		Msg("evaluating conversation simulation")
 
 	score, issues, err := e.judge.EvaluateConversation(ctx, prompt, history)
 	if err != nil {
@@ -154,11 +164,11 @@ func (e *SimulateEvaluator) Evaluate(
 		Issues:       issues,
 	}
 
-	e.logger.Info("conversation evaluation complete",
-		slog.String("sim_id", simID),
-		slog.Int("score", score),
-		slog.Int("issues", len(issues)),
-	)
+	e.logger.Info().
+		Str("sim_id", simID).
+		Int("score", score).
+		Int("issues", len(issues)).
+		Msg("conversation evaluation complete")
 
 	return result, nil
 }

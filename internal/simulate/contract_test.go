@@ -4,12 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"io"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/ruptor-dev/cli/internal/config"
+	"github.com/ruptor-dev/cli/internal/ui"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -138,7 +138,7 @@ func TestCallAgentHTTP_ContractSurface(t *testing.T) {
 	defer srv.Close()
 
 	stub := &stubLLMClient{responses: []string{"user says hi"}}
-	s := NewSimulator(stub, http.DefaultClient, slog.Default(), config.SimAgentConfig{
+	s := NewSimulator(stub, http.DefaultClient, ui.SilentLogger(), config.SimAgentConfig{
 		BaseURL:        srv.URL,
 		Endpoint:       "/chat",
 		ResponseFormat: config.ResponseFormatAuto,

@@ -3,8 +3,6 @@ package proxy_test
 import (
 	"context"
 	"fmt"
-	"io"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -13,13 +11,15 @@ import (
 	"github.com/ruptor-dev/cli/internal/config"
 	"github.com/ruptor-dev/cli/internal/proxy"
 	"github.com/ruptor-dev/cli/internal/proxy/faults"
+	"github.com/ruptor-dev/cli/internal/ui"
 	"github.com/ruptor-dev/cli/pkg/types"
+	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func newTestLogger() *slog.Logger {
-	return slog.New(slog.NewTextHandler(io.Discard, nil))
+func newTestLogger() zerolog.Logger {
+	return ui.SilentLogger()
 }
 
 func TestFaultInjection(t *testing.T) {

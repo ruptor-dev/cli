@@ -2,18 +2,18 @@ package evaluator_test
 
 import (
 	"context"
-	"log/slog"
 	"testing"
 
 	"github.com/ruptor-dev/cli/internal/evaluator"
 	"github.com/ruptor-dev/cli/internal/evaluator/llmjudge"
+	"github.com/ruptor-dev/cli/internal/ui"
 	"github.com/ruptor-dev/cli/pkg/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func TestChaosEvaluator_Evaluate(t *testing.T) {
-	logger := slog.Default()
+	logger := ui.SilentLogger()
 	judge := &llmjudge.NoopJudge{}
 
 	tests := []struct {
@@ -121,7 +121,7 @@ func TestChaosEvaluator_Evaluate(t *testing.T) {
 }
 
 func TestSimulateEvaluator_Evaluate(t *testing.T) {
-	logger := slog.Default()
+	logger := ui.SilentLogger()
 	judge := &llmjudge.NoopJudge{}
 
 	e := evaluator.NewSimulateEvaluator(judge, logger)
