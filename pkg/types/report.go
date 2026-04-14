@@ -9,15 +9,19 @@ import "time"
 const ReportSchemaVersion = "1.0"
 
 type ReliabilityReport struct {
-	SchemaVersion string       `json:"schema_version"`
-	RuptorVersion string       `json:"ruptor_version"`
-	AgentName     string       `json:"agent_name"`
-	RunAt         time.Time    `json:"run_at"`
-	TotalTests    int          `json:"total_tests"`
-	Passed        int          `json:"passed"`
-	Failed        int          `json:"failed"`
-	Score         int          `json:"score"`
-	Results       []TestResult `json:"results"`
+	SchemaVersion string    `json:"schema_version"`
+	RuptorVersion string    `json:"ruptor_version"`
+	AgentName     string    `json:"agent_name"`
+	RunAt         time.Time `json:"run_at"`
+	TotalTests    int       `json:"total_tests"`
+	Passed        int       `json:"passed"`
+	Failed        int       `json:"failed"`
+	// Score is the Robustness Score in the canonical 0.0–1.0 range
+	// (1.0 = every test passed). Renderers multiply by 100 to show
+	// "67%". Persisted in this form so platform-side analytics never
+	// have to guess between "67" (percent) and "0.67" (fraction).
+	Score   float64      `json:"score"`
+	Results []TestResult `json:"results"`
 }
 
 type ConversationReport struct {

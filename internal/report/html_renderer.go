@@ -20,7 +20,7 @@ const fallbackChaosHTML = `<!DOCTYPE html>
 <style>body{font-family:sans-serif;margin:2em}table{border-collapse:collapse;width:100%}th,td{border:1px solid #ccc;padding:8px;text-align:left}.pass{color:green}.fail{color:red}</style>
 </head><body>
 <h1>Ruptor Reliability Report</h1>
-<p><strong>Agent:</strong> {{.AgentName}} | <strong>Run:</strong> {{.RunAt.Format "2006-01-02 15:04:05"}} | <strong>Score:</strong> {{.Score}}%</p>
+<p><strong>Agent:</strong> {{.AgentName}} | <strong>Run:</strong> {{.RunAt.Format "2006-01-02 15:04:05"}} | <strong>Score:</strong> {{printf "%.0f" (pct .Score)}}%</p>
 <p>Tests: {{.TotalTests}} | Passed: {{.Passed}} | Failed: {{.Failed}}</p>
 <table><tr><th>Status</th><th>Test ID</th><th>Fault</th><th>Tool</th><th>Duration</th><th>Judge</th></tr>
 {{range .Results}}<tr>
@@ -63,7 +63,16 @@ func (h *HTMLRenderer) RenderSimulate(report *types.ConversationReport) error {
 	return h.writeHTML("simulate_report.html", tmpl, report)
 }
 
+// templateFuncs exposes helpers the report templates need. `pct`
+// converts the canonical 0.0–1.0 Score into a 0–100 number so the
+// template can format it as "67%". Kept here so the embedded fallback
+// and the on-disk template share one source.
+var templateFuncs = template.FuncMap{
+	"pct": func(x float64) float64 { return x * 100 },
+}
+
 func (h *HTMLRenderer) loadTemplate(path, fallback string) (*template.Template, error) {
+	t := template.New("report").Funcs(templateFuncs)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		// Template file not found or not readable; use embedded fallback.
@@ -71,9 +80,9 @@ func (h *HTMLRenderer) loadTemplate(path, fallback string) (*template.Template, 
 			Str("path", path).
 			Err(err).
 			Msg("report: template file not readable, using fallback")
-		return template.New("report").Parse(fallback)
+		return t.Parse(fallback)
 	}
-	return template.New("report").Parse(string(data))
+	return t.Parse(string(data))
 }
 
 func (h *HTMLRenderer) writeHTML(filename string, tmpl *template.Template, data any) error {

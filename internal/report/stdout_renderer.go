@@ -19,7 +19,8 @@ func (s *StdoutRenderer) RenderChaos(report *types.ReliabilityReport) error {
 
 	fmt.Fprintf(w, "\n%s Ruptor Reliability Report %s\n", strings.Repeat("\u2550", 3), strings.Repeat("\u2550", 3))
 	fmt.Fprintf(w, "Agent: %s  |  Run: %s\n", report.AgentName, report.RunAt.Format("2006-01-02 15:04:05"))
-	fmt.Fprintf(w, "Tests: %d  |  Passed: %d  |  Failed: %d  |  Score: %d%%\n", report.TotalTests, report.Passed, report.Failed, report.Score)
+	// Score is persisted in 0.0–1.0; user-facing display is whole-percent.
+	fmt.Fprintf(w, "Tests: %d  |  Passed: %d  |  Failed: %d  |  Score: %.0f%%\n", report.TotalTests, report.Passed, report.Failed, report.Score*100)
 	fmt.Fprintf(w, "\n%s Results %s\n", strings.Repeat("\u2500", 3), strings.Repeat("\u2500", 3))
 
 	for _, r := range report.Results {

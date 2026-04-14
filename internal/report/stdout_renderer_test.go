@@ -21,7 +21,7 @@ func sampleChaosReport() *types.ReliabilityReport {
 		TotalTests: 3,
 		Passed:     2,
 		Failed:     1,
-		Score:      67,
+		Score:      0.67,
 		Results: []types.TestResult{
 			{
 				TestID:     "timeout_on_search",
@@ -179,7 +179,7 @@ func TestJSONRenderer_RenderChaos(t *testing.T) {
 	assert.Equal(t, 3, got.TotalTests)
 	assert.Equal(t, 2, got.Passed)
 	assert.Equal(t, 1, got.Failed)
-	assert.Equal(t, 67, got.Score)
+	assert.InDelta(t, 0.67, got.Score, 0.001)
 	assert.Len(t, got.Results, 3)
 	assert.Equal(t, "timeout_on_search", got.Results[0].TestID)
 	assert.True(t, got.Results[0].Passed)

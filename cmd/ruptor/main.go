@@ -161,7 +161,9 @@ func runChaos(ctx context.Context, cfgPath, outputPath, testFilter string) error
 	}
 
 	ui.PrintCompletion(ui.CompletionSummary{
-		ScorePercent: rpt.Score,
+		// Completion bar speaks in whole-percent integers; Score is
+		// the canonical 0.0–1.0 form persisted to the report.
+		ScorePercent: int(rpt.Score * 100),
 		Passed:       rpt.Passed,
 		Failed:       rpt.Failed,
 		ReportPaths:  reportPathsFor(renderer, cfg.Output, outputPath),
@@ -171,7 +173,7 @@ func runChaos(ctx context.Context, cfgPath, outputPath, testFilter string) error
 		Int("total", rpt.TotalTests).
 		Int("passed", rpt.Passed).
 		Int("failed", rpt.Failed).
-		Int("score", rpt.Score).
+		Float64("score", rpt.Score).
 		Msg("chaos run complete")
 
 	return nil
@@ -351,9 +353,9 @@ func buildChaosReport(
 		results = append(results, *r)
 	}
 
-	score := 0
+	score := 0.0
 	if len(tests) > 0 {
-		score = (passed * 100) / len(tests)
+		score = float64(passed) / float64(len(tests))
 	}
 
 	return &types.ReliabilityReport{
