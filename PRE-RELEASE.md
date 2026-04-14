@@ -93,10 +93,15 @@ Document but do not block launch on these.
       user-facing at runtime (`ruptor --help`, error messages, report
       output). `TODO(v2):` markers are fine; user-visible `TODO` is
       not.
-- [ ] `ruptor doctor` output eyeballed on a clean machine — no `nil`
+- [x] `ruptor doctor` output eyeballed on a clean machine — no `nil`
       dereferences, no paths that assume `~/.ruptor/config.yaml`
-      already exists, no surfacing of secret values. (The `doctor`
-      subcommand itself is still pending; AUDIT.md §10.)
+      already exists, no surfacing of secret values. Subcommand
+      lives at `internal/doctor` + `cmd/ruptor/doctor.go`. Verified
+      on a clean checkout with no token: missing config file is
+      reported as OK (with the path), token check warns "not logged
+      in", `MaskedSuffix` is the only token form ever rendered.
+      Smoke run produces colored ✓/⚠/✗ rows + a one-line fix hint
+      below every non-OK row.
 - [x] `ruptor version` prints the ldflags-injected version, commit,
       and build date. Verified against a `make release-dry` artifact:
       the packaged darwin/arm64 binary reports

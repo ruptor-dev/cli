@@ -212,7 +212,10 @@ The stack-swap PR (see §11) closed §8 item 9. Remaining items deserve isolated
 
 - **New packages**: `internal/auth/` (OAuth device flow), `internal/cloud/` (`CloudReportingEnabled = false` feature flag + pending-report spooler), `internal/proxy/mcp/` (JSON-RPC 2.0 tool call interception). `internal/telemetry/` shipped as a stub in the stack-swap PR; the OTLP exporter wiring is part of the `ruptor auth login` PR because it needs the token.
 - ~~**New v1 faults**: `llm_error`, `llm_timeout` (enum + handlers + tests).~~ Landed as `e732976` and `29929c1`.
-- **New v1 subcommands**: `auth login|status|logout`, `doctor`, `update`, `sync`.
+- **New v1 subcommands**: ~~`auth login|status|logout`~~ (landed),
+  ~~`doctor`~~ (landed in `internal/doctor` + `cmd/ruptor/doctor.go`),
+  ~~`update`~~ (landed in `internal/updater` + `cmd/ruptor/update.go`),
+  `sync`.
 - **Release + OSS hygiene**: `.goreleaser.yaml`, cosign signing, GitHub Actions release workflow, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, issue templates.
 - **Robustness Score**: retype `ReliabilityReport.Score` as `float64` in `[0.0, 1.0]`; update renderers.
 - **Chaos pipeline follow-ups**: `Recovered` signal (requires retry-aware proxy), agent-behavior transcript for LLM judge input, `Open report? [Y/n]` completion prompt.
