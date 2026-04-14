@@ -62,6 +62,7 @@ type Proxy struct {
 	mu       sync.Mutex
 	listener net.Listener
 	rp       *httputil.ReverseProxy
+	obs      map[string]*Observation
 }
 
 // NewProxy constructs a Proxy with the given configuration, test cases,

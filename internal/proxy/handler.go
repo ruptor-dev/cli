@@ -13,15 +13,23 @@ import (
 
 // ServeHTTP implements http.Handler. It matches the request path against
 // configured test cases, rolls against the probability, and either injects a
-// fault or reverse-proxies the request to the passthrough backend.
+// fault or reverse-proxies the request to the passthrough backend. Each
+// matched path produces an Observation used by the evaluator at shutdown.
 func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	test, ok := p.matchTest(r.URL.Path)
-	if ok && p.shouldInject(test.Probability) {
-		p.injectFault(w, r, test)
+	if !ok {
+		p.passthrough(w, r, "")
 		return
 	}
 
-	p.passthrough(w, r)
+	rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+	if p.shouldInject(test.Probability) {
+		p.injectFault(rec, r, test)
+		p.recordFault(test.ID, rec.status)
+		return
+	}
+
+	p.passthrough(rec, r, test.ID)
 }
 
 // matchTest finds the first TestConfig whose Tool matches the request path.
@@ -112,8 +120,11 @@ func (p *Proxy) reverseProxy() (*httputil.ReverseProxy, error) {
 	return p.rp, nil
 }
 
-// passthrough reverse-proxies the request to the configured backend.
-func (p *Proxy) passthrough(w http.ResponseWriter, r *http.Request) {
+// passthrough reverse-proxies the request to the configured backend. When
+// testID is non-empty, the request matched a configured test whose
+// probability did not fire; we still record the hit so the evaluator sees
+// the path was exercised.
+func (p *Proxy) passthrough(w http.ResponseWriter, r *http.Request, testID string) {
 	rp, err := p.reverseProxy()
 	if err != nil {
 		p.logger.Error("proxy: passthrough setup",
@@ -128,4 +139,34 @@ func (p *Proxy) passthrough(w http.ResponseWriter, r *http.Request) {
 	)
 
 	rp.ServeHTTP(w, r)
+
+	if testID != "" {
+		if rec, ok := w.(*statusRecorder); ok {
+			p.recordPassthrough(testID, rec.status)
+		}
+	}
+}
+
+// statusRecorder captures the HTTP status code a handler writes so the
+// proxy can surface it in Observations without re-reading the response.
+type statusRecorder struct {
+	http.ResponseWriter
+	status      int
+	wroteStatus bool
+}
+
+func (s *statusRecorder) WriteHeader(code int) {
+	if !s.wroteStatus {
+		s.status = code
+		s.wroteStatus = true
+	}
+	s.ResponseWriter.WriteHeader(code)
+}
+
+func (s *statusRecorder) Write(b []byte) (int, error) {
+	if !s.wroteStatus {
+		s.status = http.StatusOK
+		s.wroteStatus = true
+	}
+	return s.ResponseWriter.Write(b)
 }

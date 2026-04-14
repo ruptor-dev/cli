@@ -153,24 +153,105 @@ func runChaos(ctx context.Context, cfgPath, outputPath, testFilter string) error
 		slog.Int("port", cfg.Proxy.Port),
 	)
 
-	// MVP: wait for context cancellation (agent orchestration is out of scope).
-	// The proxy runs and intercepts requests until the user stops the process.
+	// Block until the user stops the run (Ctrl-C) or the proxy exits.
+	// The user drives their own agent against the proxy; on ctx.Done we
+	// drain the observations into a ReliabilityReport.
 	select {
 	case <-ctx.Done():
-		logger.Info("shutting down")
+		logger.Info("shutting down; waiting for proxy to stop")
+		if err := <-proxyErrCh; err != nil {
+			return fmt.Errorf("proxy error: %w", err)
+		}
 	case err := <-proxyErrCh:
 		if err != nil {
 			return fmt.Errorf("proxy error: %w", err)
 		}
 	}
 
-	// Placeholder: in the full version the evaluator and renderer would be
-	// called after the agent has completed its run. For now we render an
-	// empty report to verify wiring.
-	_ = eval
-	_ = renderer
+	rpt, err := buildChaosReport(context.Background(), eval, cfg, tests, p.Observations(), logger)
+	if err != nil {
+		return err
+	}
+
+	if err := renderer.RenderChaos(rpt); err != nil {
+		return fmt.Errorf("rendering chaos report: %w", err)
+	}
+
+	logger.Info("chaos run complete",
+		slog.Int("total", rpt.TotalTests),
+		slog.Int("passed", rpt.Passed),
+		slog.Int("failed", rpt.Failed),
+		slog.Int("score", rpt.Score),
+	)
 
 	return nil
+}
+
+// buildChaosReport assembles a ReliabilityReport from per-test observations.
+// Tests that never received a request are still emitted (Hits=0) so the
+// user sees which paths their agent did not exercise during the run.
+func buildChaosReport(
+	ctx context.Context,
+	eval *evaluator.ChaosEvaluator,
+	cfg *config.ChaosConfig,
+	tests []config.TestConfig,
+	obs map[string]proxy.Observation,
+	logger *slog.Logger,
+) (*types.ReliabilityReport, error) {
+	results := make([]types.TestResult, 0, len(tests))
+	passed, failed := 0, 0
+
+	for _, t := range tests {
+		o := obs[t.ID]
+		r, err := eval.Evaluate(
+			ctx,
+			t.ID,
+			t.Fault,
+			t.Tool,
+			o.LastStatusCode,
+			o.Hits,
+			o.HadError,
+			false, // Recovered — wire when retry-aware proxy lands
+			cfg.Evaluation.LLMJudgePrompt,
+			"",    // agent behavior transcript — collected in a later PR
+		)
+		if err != nil {
+			logger.Warn("chaos evaluator failed",
+				slog.String("test_id", t.ID),
+				slog.String("error", err.Error()),
+			)
+			r = &types.TestResult{
+				TestID:    t.ID,
+				FaultType: t.Fault,
+				Tool:      t.Tool,
+				Passed:    false,
+				Error:     err.Error(),
+			}
+		}
+		if r.Passed {
+			passed++
+		} else {
+			failed++
+		}
+		results = append(results, *r)
+	}
+
+	score := 0
+	if len(tests) > 0 {
+		score = (passed * 100) / len(tests)
+	}
+
+	return &types.ReliabilityReport{
+		SchemaVersion: types.ReportSchemaVersion,
+		RuptorVersion: version,
+		AgentName:     cfg.Agent.Name,
+		RunAt:         time.Now(),
+		TotalTests:    len(tests),
+		Passed:        passed,
+		Failed:        failed,
+		Score:         score,
+		Results:       results,
+	}, nil
 }
 
 // ---------------------------------------------------------------------------
