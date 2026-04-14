@@ -210,7 +210,8 @@ Test suite: **143 passing** across 13 packages. `go build ./...` and `go vet ./.
 
 Everything in §8 items 9–15. These are the full v1 stack swap and OSS hygiene, and each deserves an isolated PR per CLAUDE.md "one logical change per PR":
 
-- **Stack swap**: zerolog (replace slog), viper (config hierarchy + `~/.ruptor/config.yaml` + env precedence), bubbletea + lipgloss v2 + bubbles (expand `internal/ui/` beyond the stub), `cenkalti/backoff/v4`, `go.opentelemetry.io/otel` v1, Go 1.26.2, cobra v2.5.1.
+- **Stack swap** (in flight on the stack-swap PR): zerolog (replace slog), viper (config hierarchy + `~/.ruptor/config.yaml` + env precedence), bubbletea + lipgloss v2 + bubbles (expand `internal/ui/` beyond the stub), `cenkalti/backoff/v4`, `go.opentelemetry.io/otel` v1, Go 1.26.2. NOTE: cobra stays on v1.10.2 — there is no `github.com/spf13/cobra/v2` module published. Viper stays on v1.21.0 — v1.31+ does not exist. CLAUDE.md was corrected to match.
+- **TUI follow-up**: replace the 100ms tick-poller (TUI reads `proxy.Observations()` periodically) with a push channel from proxy → UI for lower-latency state updates.
 - **New packages**: `internal/auth/` (OAuth device flow), `internal/cloud/` (`CloudReportingEnabled = false` feature flag + pending-report spooler), `internal/telemetry/` (OTel opt-in), `internal/proxy/mcp/` (JSON-RPC 2.0 tool call interception).
 - **New v1 faults**: `llm_error`, `llm_timeout` (enum + handlers + tests).
 - **New v1 subcommands**: `auth login|status|logout`, `doctor`, `update`, `sync`.

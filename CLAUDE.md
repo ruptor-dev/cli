@@ -100,17 +100,21 @@ cli/
 
 ## Stack
 
+Versions reflect what is actually published as of this writing. Earlier drafts
+of CLAUDE.md referenced fictional versions (cobra v2.5.1, viper v1.31+) — those
+were corrected during the stack-swap PR.
+
 | Dependency | Version | Purpose |
 |-----------|---------|---------|
 | Go | 1.26.2 | Language |
-| github.com/spf13/cobra | v2.5.1 | CLI framework |
-| github.com/spf13/viper | v1.31+ | Config management |
-| github.com/charmbracelet/bubbletea | latest | TUI framework |
-| github.com/charmbracelet/lipgloss/v2 | latest | Terminal styling |
-| github.com/charmbracelet/bubbles | latest | TUI components |
-| github.com/rs/zerolog | latest | Structured logging |
-| go.opentelemetry.io/otel | v1.x latest | Telemetry |
-| github.com/cenkalti/backoff/v4 | v4 | Retry with jitter |
+| github.com/spf13/cobra | v1.10.2 | CLI framework (no v2 module exists) |
+| github.com/spf13/viper | v1.21.0 | Config management |
+| github.com/charmbracelet/bubbletea/v2 | v2.0.5 | TUI framework |
+| github.com/charmbracelet/lipgloss/v2 | v2.0.3 | Terminal styling |
+| github.com/charmbracelet/bubbles/v2 | v2.1.0 | TUI components |
+| github.com/rs/zerolog | v1.35.0 | Structured logging |
+| go.opentelemetry.io/otel | v1.43.0 | Telemetry |
+| github.com/cenkalti/backoff/v4 | v4.3.0 | Retry with jitter |
 | github.com/goreleaser/goreleaser | v2 | Release automation |
 
 ## Code rules
