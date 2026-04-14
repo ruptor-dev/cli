@@ -211,7 +211,7 @@ Test suite: **143 passing** across 13 packages. `go build ./...` and `go vet ./.
 The stack-swap PR (see §11) closed §8 item 9. Remaining items deserve isolated PRs per CLAUDE.md "one logical change per PR":
 
 - **New packages**: `internal/auth/` (OAuth device flow), `internal/cloud/` (`CloudReportingEnabled = false` feature flag + pending-report spooler), `internal/proxy/mcp/` (JSON-RPC 2.0 tool call interception). `internal/telemetry/` shipped as a stub in the stack-swap PR; the OTLP exporter wiring is part of the `ruptor auth login` PR because it needs the token.
-- **New v1 faults**: `llm_error`, `llm_timeout` (enum + handlers + tests).
+- ~~**New v1 faults**: `llm_error`, `llm_timeout` (enum + handlers + tests).~~ Landed as `e732976` and `29929c1`.
 - **New v1 subcommands**: `auth login|status|logout`, `doctor`, `update`, `sync`.
 - **Release + OSS hygiene**: `.goreleaser.yaml`, cosign signing, GitHub Actions release workflow, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, issue templates.
 - **Robustness Score**: retype `ReliabilityReport.Score` as `float64` in `[0.0, 1.0]`; update renderers.
@@ -223,6 +223,7 @@ The stack-swap PR (see §11) closed §8 item 9. Remaining items deserve isolated
 
 ### Known non-blocking issues
 
+- **`docs/superpowers/specs/SKILL-proxy.md` is out of sync with the code.** The doc describes an aspirational `FaultHandler { Name(), CanHandle(), Inject(ctx, req, next) }` chain-of-responsibility contract with `ProxyRequest` / `HandlerFunc` types that do not exist in `pkg/types/` or `internal/proxy/`. The six shipped faults (plus `llm_error`, `llm_timeout`) all implement the simpler `types.Fault { Type(), Inject(w, r) error }` interface behind a `FaultRegistry` + factory. Each new fault follows that pattern for consistency. Either refactor all nine faults to match the doc, or rewrite the doc to match the code — do not accept a review note asking to follow the doc verbatim until that reconciliation happens.
 - **golangci-lint spurious log line.** Both `v1.64.8` and `v2.11.4` built against Go 1.26.2 emit a `level=error msg="[linters_context] typechecking error: stat …/cli/<first-arg>: directory not found"` line on every run. Exit code is still 0; `0 issues.` is reported. Not a source problem — looks like a golangci-lint↔Go 1.26 incompatibility. Ignore until a fixed linter release ships.
 
 ## 11. Stack-swap PR (landed)
