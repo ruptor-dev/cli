@@ -208,16 +208,32 @@ Test suite: **143 passing** across 13 packages. `go build ./...` and `go vet ./.
 
 ## 10. Deferred to later PRs
 
-Everything in §8 items 9–15. These are the full v1 stack swap and OSS hygiene, and each deserves an isolated PR per CLAUDE.md "one logical change per PR":
+The stack-swap PR (see §11) closed §8 item 9. Remaining items deserve isolated PRs per CLAUDE.md "one logical change per PR":
 
-- **Stack swap** (in flight on the stack-swap PR): zerolog (replace slog), viper (config hierarchy + `~/.ruptor/config.yaml` + env precedence), bubbletea + lipgloss v2 + bubbles (expand `internal/ui/` beyond the stub), `cenkalti/backoff/v4`, `go.opentelemetry.io/otel` v1, Go 1.26.2. NOTE: cobra stays on v1.10.2 — there is no `github.com/spf13/cobra/v2` module published. Viper stays on v1.21.0 — v1.31+ does not exist. CLAUDE.md was corrected to match.
-- **TUI follow-up**: replace the 100ms tick-poller (TUI reads `proxy.Observations()` periodically) with a push channel from proxy → UI for lower-latency state updates.
-- **New packages**: `internal/auth/` (OAuth device flow), `internal/cloud/` (`CloudReportingEnabled = false` feature flag + pending-report spooler), `internal/telemetry/` (OTel opt-in), `internal/proxy/mcp/` (JSON-RPC 2.0 tool call interception).
+- **New packages**: `internal/auth/` (OAuth device flow), `internal/cloud/` (`CloudReportingEnabled = false` feature flag + pending-report spooler), `internal/proxy/mcp/` (JSON-RPC 2.0 tool call interception). `internal/telemetry/` shipped as a stub in the stack-swap PR; the OTLP exporter wiring is part of the `ruptor auth login` PR because it needs the token.
 - **New v1 faults**: `llm_error`, `llm_timeout` (enum + handlers + tests).
 - **New v1 subcommands**: `auth login|status|logout`, `doctor`, `update`, `sync`.
 - **Release + OSS hygiene**: `.goreleaser.yaml`, cosign signing, GitHub Actions release workflow, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, issue templates.
 - **Robustness Score**: retype `ReliabilityReport.Score` as `float64` in `[0.0, 1.0]`; update renderers.
-- **Chaos pipeline follow-ups**: `Recovered` signal (requires retry-aware proxy), agent-behavior transcript for LLM judge input, `RUPTOR_PROXY_PORT` env var (lands with the viper work).
-- **TUI**: Bubbletea live progress, Ruptor theme, `Open report? [Y/n]` prompt.
+- **Chaos pipeline follow-ups**: `Recovered` signal (requires retry-aware proxy), agent-behavior transcript for LLM judge input, `Open report? [Y/n]` completion prompt.
+- **TUI follow-up**: replace the 100ms tick-poller (TUI reads `proxy.Observations()` periodically) with a push channel from proxy → UI for lower-latency state updates.
+- **Test coverage gaps surfaced by the stack-swap PR**:
+  - Unit tests for `parseChaosResponse` and `parseConversationResponse` in `internal/evaluator/llmjudge`. The `OpenAIJudge` struct is at 0% coverage because the parsers run only inside API calls; extract them or test them directly.
+  - Integration test that spawns the `ruptor` binary against an `httptest.Server` backend. Covers `cmd/ruptor` (currently 0%) end-to-end.
 
-`ruptor run` is now wired end-to-end (proxy → observations → evaluator → report) but the Robustness Score format and the Bubbletea TUI remain the biggest visible gaps before a v1 tag.
+### Known non-blocking issues
+
+- **golangci-lint spurious log line.** Both `v1.64.8` and `v2.11.4` built against Go 1.26.2 emit a `level=error msg="[linters_context] typechecking error: stat …/cli/<first-arg>: directory not found"` line on every run. Exit code is still 0; `0 issues.` is reported. Not a source problem — looks like a golangci-lint↔Go 1.26 incompatibility. Ignore until a fixed linter release ships.
+
+## 11. Stack-swap PR (landed)
+
+| Commit | Summary |
+|---|---|
+| `1f82406` | Correct CLAUDE.md stack table to real published versions |
+| `ef5f9f6` | Replace stdlib `log/slog` with `github.com/rs/zerolog` |
+| `f86cbf4` | Viper-backed `Settings` + `RUPTOR_*` env overrides |
+| `69be2c4` | OTel tracing stub (`internal/telemetry`) |
+| `40e14f9` | Retry-with-jitter tests for llmclient (`backoff/v4`) |
+| `9df5c82` | Bubbletea TUI for `ruptor run` + `.golangci.yml` |
+
+Net result: `make check` green, 167 tests passing, 14 packages. Go 1.26.2, zerolog, viper v1.21.0, bubbletea v2.0.5, lipgloss v2.0.3, otel v1.43.0, backoff/v4 v4.3.0. Cobra stays on v1.10.2 and viper stays on v1.21.0 because the spec's v2.5.1 / v1.31+ versions never shipped publicly.
