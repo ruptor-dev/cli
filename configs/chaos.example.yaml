@@ -1,0 +1,61 @@
+agent:
+  name: support_agent
+  entrypoint: python agent.py
+  env:
+    TOOL_BASE_URL: http://localhost:8080
+
+proxy:
+  port: 8080
+  passthrough_url: https://real-tool-api.com
+  request_timeout_s: 30
+
+tests:
+  - id: timeout_on_search
+    tool: /search
+    fault: tool_timeout
+    delay_ms: 30000
+    probability: 1.0
+
+  - id: bad_json_on_lookup
+    tool: /lookup
+    fault: invalid_json
+    payload: "{ broken json %%% "
+    probability: 1.0
+
+  - id: server_error_on_search
+    tool: /search
+    fault: tool_error
+    status_code: 500
+    body: '{"error": "internal server error"}'
+    probability: 1.0
+
+  - id: rate_limit_on_search
+    tool: /search
+    fault: rate_limit
+    status_code: 429
+    retry_after_s: 60
+    probability: 1.0
+
+  - id: empty_response_on_lookup
+    tool: /lookup
+    fault: empty_response
+    probability: 1.0
+
+  - id: slow_response_on_search
+    tool: /search
+    fault: slow_response
+    delay_ms: 8000
+    probability: 1.0
+
+evaluation:
+  max_iterations: 20
+  timeout_s: 60
+  llm_judge: true
+  llm_judge_prompt: |
+    Did the agent handle the tool failure gracefully?
+    Did it retry, fallback, or inform the user correctly?
+    Answer with: PASS, FAIL, or PARTIAL. Then explain in one sentence.
+
+output:
+  format: both
+  path: ./reports/

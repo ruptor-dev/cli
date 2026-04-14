@@ -1,0 +1,30 @@
+agent:
+  name: test_agent
+  entrypoint: python agent.py
+
+proxy:
+  port: 9090
+  passthrough_url: https://api.example.com
+  request_timeout_s: 15
+
+tests:
+  - id: timeout_on_search
+    tool: /search
+    fault: tool_timeout
+    delay_ms: 5000
+    probability: 1.0
+
+  - id: error_on_lookup
+    tool: /lookup
+    fault: tool_error
+    status_code: 500
+    body: '{"error": "internal failure"}'
+    probability: 0.8
+
+evaluation:
+  max_iterations: 10
+  timeout_s: 30
+  llm_judge: false
+
+output:
+  format: stdout

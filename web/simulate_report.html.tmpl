@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FaultForge Simulation Report</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    margin: 0; padding: 2rem; background: #f8f9fa; color: #1a1a1a; line-height: 1.5;
+  }
+  .container { max-width: 1200px; margin: 0 auto; }
+  h1 { font-size: 1.5rem; font-weight: 600; margin: 0 0 0.25rem; }
+  .subtitle { color: #6b7280; font-size: 0.875rem; margin-bottom: 1.5rem; }
+  .summary {
+    display: flex; flex-wrap: wrap; gap: 1rem; margin-bottom: 1.5rem;
+  }
+  .card {
+    background: #fff; border: 1px solid #e5e7eb; border-radius: 8px;
+    padding: 1rem 1.25rem; min-width: 140px; flex: 1;
+  }
+  .card-label { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; color: #6b7280; margin-bottom: 0.25rem; }
+  .card-value { font-size: 1.5rem; font-weight: 700; }
+  .card-value.reached { color: #16a34a; }
+  .card-value.missed { color: #dc2626; }
+  table {
+    width: 100%; border-collapse: collapse; background: #fff;
+    border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden;
+    font-size: 0.875rem;
+  }
+  thead { background: #f9fafb; }
+  th {
+    text-align: left; padding: 0.75rem 1rem; font-weight: 600;
+    border-bottom: 2px solid #e5e7eb; white-space: nowrap;
+  }
+  td { padding: 0.75rem 1rem; border-bottom: 1px solid #f3f4f6; vertical-align: top; }
+  tr:last-child td { border-bottom: none; }
+  .status {
+    display: inline-block; padding: 0.125rem 0.5rem; border-radius: 9999px;
+    font-size: 0.75rem; font-weight: 600; text-transform: uppercase;
+  }
+  .status-reached { background: #dcfce7; color: #15803d; }
+  .status-missed { background: #fee2e2; color: #b91c1c; }
+  .issues { font-size: 0.8rem; color: #6b7280; }
+  .empty { color: #9ca3af; }
+  @media (max-width: 640px) {
+    body { padding: 1rem; }
+    .summary { flex-direction: column; }
+    table { display: block; overflow-x: auto; }
+  }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>FaultForge Simulation Report</h1>
+  <p class="subtitle"><strong>Agent:</strong> {{.AgentName}} &middot; <strong>Run:</strong> {{.RunAt.Format "2006-01-02 15:04:05"}}</p>
+
+  <div class="summary">
+    <div class="card">
+      <div class="card-label">Total Simulations</div>
+      <div class="card-value">{{.TotalSims}}</div>
+    </div>
+    <div class="card">
+      <div class="card-label">Goals Reached</div>
+      <div class="card-value reached">{{.GoalReached}}</div>
+    </div>
+    <div class="card">
+      <div class="card-label">Avg Score</div>
+      <div class="card-value">{{printf "%.1f" .AvgScore}}</div>
+    </div>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Status</th>
+        <th>Simulation ID</th>
+        <th>Persona</th>
+        <th>Goal</th>
+        <th>Turns</th>
+        <th>Max Turns</th>
+        <th>Quality Score</th>
+        <th>Duration</th>
+        <th>Issues</th>
+      </tr>
+    </thead>
+    <tbody>
+      {{range .Results}}<tr>
+        <td><span class="status {{if .GoalReached}}status-reached{{else}}status-missed{{end}}">{{if .GoalReached}}REACHED{{else}}MISSED{{end}}</span></td>
+        <td>{{.SimulationID}}</td>
+        <td>{{.Persona}}</td>
+        <td>{{.Goal}}</td>
+        <td>{{.TurnCount}}</td>
+        <td>{{.MaxTurns}}</td>
+        <td>{{.QualityScore}}</td>
+        <td>{{.DurationMs}}ms</td>
+        <td class="issues">{{if .Issues}}{{range $i, $issue := .Issues}}{{if $i}}, {{end}}{{$issue}}{{end}}{{else}}<span class="empty">&mdash;</span>{{end}}</td>
+      </tr>{{end}}
+    </tbody>
+  </table>
+</div>
+</body>
+</html>

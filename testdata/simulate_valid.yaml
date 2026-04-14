@@ -1,0 +1,20 @@
+agent:
+  name: support_agent
+  base_url: http://localhost:3000
+  request_timeout_s: 20
+
+simulations:
+  - id: impatient_user
+    persona: "Frustrated user who wants a quick resolution"
+    goal: "Cancel subscription"
+    max_turns: 10
+    success_criteria: "The agent completed the cancellation"
+
+evaluation:
+  goal_completion: true
+  turn_efficiency: true
+  tone_quality: false
+  llm_judge_prompt: "Was the agent helpful? Answer PASS or FAIL."
+
+output:
+  format: stdout

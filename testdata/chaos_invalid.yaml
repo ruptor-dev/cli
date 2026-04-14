@@ -1,0 +1,27 @@
+agent:
+  name: ""
+  entrypoint: python agent.py
+
+proxy:
+  port: 0
+  passthrough_url: https://api.example.com
+  request_timeout_s: 10
+
+tests:
+  - id: bad_probability
+    tool: /search
+    fault: tool_timeout
+    probability: 1.5
+
+  - id: missing_tool
+    tool: ""
+    fault: tool_error
+    probability: 0.5
+
+evaluation:
+  max_iterations: 5
+  timeout_s: 30
+  llm_judge: false
+
+output:
+  format: stdout

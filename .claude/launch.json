@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "faultforge-chaos",
+      "runtimeExecutable": "go",
+      "runtimeArgs": ["run", "./cmd/faultforge", "run", "configs/chaos.example.yaml"],
+      "port": 8080
+    },
+    {
+      "name": "faultforge-simulate",
+      "runtimeExecutable": "go",
+      "runtimeArgs": ["run", "./cmd/faultforge", "simulate", "configs/simulate.example.yaml"],
+      "port": 3000
+    }
+  ]
+}

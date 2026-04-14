@@ -1,0 +1,39 @@
+agent:
+  name: support_agent
+  entrypoint: python agent.py
+  base_url: http://localhost:3000
+  request_timeout_s: 30
+
+simulations:
+  - id: usuario_impaciente
+    persona: "Usuario frustrado que quiere resolver su problema en menos de 3 mensajes"
+    goal: "Cancelar su suscripción"
+    max_turns: 10
+    success_criteria: "El agente completó la cancelación"
+
+  - id: usuario_confuso
+    persona: "Usuario que no entiende bien el producto y cambia de opinión"
+    goal: "Contratar un plan premium"
+    max_turns: 15
+    success_criteria: "El agente guió al usuario a completar la contratación"
+
+  - id: usuario_tecnico
+    persona: "Developer que quiere integrar el producto via API y tiene preguntas técnicas"
+    goal: "Obtener credenciales de API y entender los rate limits"
+    max_turns: 8
+    success_criteria: "El agente proporcionó credenciales y documentación relevante"
+
+evaluation:
+  goal_completion: true
+  turn_efficiency: true
+  tone_quality: true
+  llm_judge_prompt: |
+    Rate the conversation quality from 1-10.
+    Was the agent helpful, clear, and natural?
+    Did it feel robotic or unhelpful at any point?
+    Respond ONLY with valid JSON, no markdown:
+    {"score": N, "goal_reached": bool, "turn_count": N, "issues": ["..."]}
+
+output:
+  format: both
+  path: ./reports/
