@@ -1,0 +1,150 @@
+# goreleaser configuration for ruptor.
+#
+# Pinning: requires goreleaser v2. CI pins the exact version to avoid
+# surprise changes between releases.
+#
+# Signing: cosign keyless via GitHub Actions OIDC identity. No long-lived
+# private key lives in the repo or in CI secrets — the Rekor transparency
+# log is the audit trail. See PRE-RELEASE.md for the tag-day checklist.
+
+version: 2
+
+project_name: ruptor
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: ruptor
+    binary: ruptor
+    main: ./cmd/ruptor
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    # Omit combinations nobody actually ships.
+    ignore:
+      - goos: windows
+        goarch: arm64
+    ldflags:
+      - -s -w
+      - -X main.version={{ .Version }}
+      - -X main.commit={{ .Commit }}
+      - -X main.buildDate={{ .Date }}
+    flags:
+      - -trimpath
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+archives:
+  - id: default
+    ids:
+      - ruptor
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_
+      {{- if eq .Os "darwin" }}macOS{{ else }}{{ title .Os }}{{ end }}_
+      {{- if eq .Arch "amd64" }}x86_64{{ else }}{{ .Arch }}{{ end }}
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    files:
+      - LICENSE*
+      - README.md
+      - CONTRIBUTING.md
+      - CODE_OF_CONDUCT.md
+
+checksum:
+  name_template: "{{ .ProjectName }}_{{ .Version }}_checksums.txt"
+  algorithm: sha256
+
+# cosign keyless signs the checksum file. Verifying a downloaded binary
+# boils down to: cosign verify-blob --certificate=<...> --signature=<...>
+# <checksum-file>, then sha256sum -c.
+signs:
+  - id: cosign-checksums
+    cmd: cosign
+    signature: "${artifact}.sig"
+    certificate: "${artifact}.pem"
+    args:
+      - sign-blob
+      - --yes
+      - --output-signature=${signature}
+      - --output-certificate=${certificate}
+      - ${artifact}
+    artifacts: checksum
+    output: true
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  use: git
+  filters:
+    exclude:
+      - "^chore(\\(.+\\))?:"
+      - "^docs(\\(.+\\))?:"
+      - "^test(\\(.+\\))?:"
+      - "^style(\\(.+\\))?:"
+      - "Merge pull request"
+      - "Merge branch"
+  groups:
+    - title: Features
+      regexp: "^feat(\\(.+\\))?:"
+      order: 0
+    - title: Fixes
+      regexp: "^fix(\\(.+\\))?:"
+      order: 1
+    - title: Refactors
+      regexp: "^refactor(\\(.+\\))?:"
+      order: 2
+    - title: Other
+      order: 99
+
+# Homebrew cask — publishes to ruptor-dev/homebrew-tap. The tap repo is
+# a PRE-RELEASE.md blocker; goreleaser fails loudly at release time if
+# it does not exist, which is the behaviour we want.
+homebrew_casks:
+  - name: ruptor
+    ids:
+      - default
+    repository:
+      owner: ruptor-dev
+      name: homebrew-tap
+      branch: main
+    commit_author:
+      name: goreleaser
+      email: bot@ruptor.dev
+    homepage: https://ruptor.dev
+    description: Reliability testing CLI for AI agents
+
+release:
+  github:
+    owner: ruptor-dev
+    name: cli
+  draft: false
+  prerelease: auto
+  name_template: "{{ .ProjectName }} v{{ .Version }}"
+  header: |
+    # ruptor {{ .Tag }}
+
+    Download, verify with cosign, then run.
+  footer: |
+    **Verify**
+    ```
+    cosign verify-blob \
+      --certificate-identity-regexp 'https://github\.com/ruptor-dev/cli' \
+      --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
+      --signature ruptor_{{ .Version }}_checksums.txt.sig \
+      --certificate ruptor_{{ .Version }}_checksums.txt.pem \
+      ruptor_{{ .Version }}_checksums.txt
+    sha256sum -c ruptor_{{ .Version }}_checksums.txt
+    ```

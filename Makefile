@@ -1,4 +1,4 @@
-.PHONY: build test lint run-example clean tools check
+.PHONY: build test lint run-example clean tools check release-dry release-check
 
 BUILD_DIR  := ./bin
 BINARY     := $(BUILD_DIR)/ruptor
@@ -41,7 +41,17 @@ clean:
 
 ## tools: install dev tools
 tools:
-	go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+	go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
+	go install github.com/goreleaser/goreleaser/v2@latest
+	@echo "Install cosign separately per your OS: https://docs.sigstore.dev/cosign/installation/"
+
+## release-check: validate the goreleaser config without building anything
+release-check:
+	goreleaser check
+
+## release-dry: build all release artifacts locally, skip publish and cosign
+release-dry:
+	goreleaser release --snapshot --clean --skip=publish,sign
 
 ## help: print available targets
 help:

@@ -2,6 +2,7 @@
 /bin/
 /faultforge
 /ruptor
+/dist/
 coverage.out
 
 # Reports
