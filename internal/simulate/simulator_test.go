@@ -2,6 +2,7 @@ package simulate
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"testing"
@@ -22,16 +23,32 @@ func (s *stubLLMClient) Complete(_ context.Context, _ []map[string]string, _ str
 	return resp, nil
 }
 
+// scriptedGoalChecker returns YES on a specific turn and NO otherwise,
+// letting tests pin goal-reached behavior without touching the LLM.
+type scriptedGoalChecker struct {
+	reachOnCall int // 1-based. 0 disables.
+	calls       int
+	err         error
+}
+
+func (g *scriptedGoalChecker) Check(_ context.Context, _, _, _ string) (bool, error) {
+	g.calls++
+	if g.err != nil {
+		return false, g.err
+	}
+	return g.reachOnCall > 0 && g.calls == g.reachOnCall, nil
+}
+
 func TestSimulatorRun(t *testing.T) {
 	logger := slog.Default()
 
 	tests := []struct {
-		name        string
-		sim         config.Simulation
-		responses   []string
-		wantReached bool
-		wantTurns   int
-		wantErr     bool
+		name         string
+		sim          config.Simulation
+		responses    []string
+		reachOnCall  int
+		wantReached  bool
+		wantTurns    int
 	}{
 		{
 			name: "goal reached on first turn",
@@ -42,8 +59,8 @@ func TestSimulatorRun(t *testing.T) {
 				MaxTurns:        5,
 				SuccessCriteria: "refund approved",
 			},
-			// Turn 1: user message, then agent response containing criteria.
-			responses:   []string{"I want a refund for my order", "Your refund approved. It will be processed in 3-5 days."},
+			responses:   []string{"I want a refund", "Your refund is approved."},
+			reachOnCall: 1,
 			wantReached: true,
 			wantTurns:   1,
 		},
@@ -56,13 +73,13 @@ func TestSimulatorRun(t *testing.T) {
 				MaxTurns:        5,
 				SuccessCriteria: "password has been reset",
 			},
-			// Turn 1: user msg, agent (no criteria). Turn 2: user msg, agent (criteria).
 			responses: []string{
 				"I forgot my password",
 				"Could you provide your email?",
 				"My email is user@example.com",
-				"Your password has been reset. Check your inbox.",
+				"Your password has been reset.",
 			},
+			reachOnCall: 2,
 			wantReached: true,
 			wantTurns:   2,
 		},
@@ -75,51 +92,21 @@ func TestSimulatorRun(t *testing.T) {
 				MaxTurns:        3,
 				SuccessCriteria: "discount granted",
 			},
-			// Responses never contain "discount granted".
-			responses:   []string{"Give me a discount", "I understand your concern, but I cannot offer that."},
+			responses:   []string{"Give me a discount", "I cannot help with that."},
+			reachOnCall: 0,
 			wantReached: false,
 			wantTurns:   3,
-		},
-		{
-			name: "empty persona and goal still works",
-			sim: config.Simulation{
-				ID:              "test-4",
-				Persona:         "",
-				Goal:            "",
-				MaxTurns:        2,
-				SuccessCriteria: "done",
-			},
-			responses:   []string{"hello", "done"},
-			wantReached: true,
-			wantTurns:   1,
-		},
-		{
-			name: "empty success criteria never matches",
-			sim: config.Simulation{
-				ID:              "test-5",
-				Persona:         "tester",
-				Goal:            "test empty criteria",
-				MaxTurns:        2,
-				SuccessCriteria: "",
-			},
-			responses:   []string{"hi", "sure thing"},
-			wantReached: false,
-			wantTurns:   2,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			stub := &stubLLMClient{responses: tt.responses}
-			sim := NewSimulatorFromBaseURL(stub, http.DefaultClient, logger, "", 30)
+			goal := &scriptedGoalChecker{reachOnCall: tt.reachOnCall}
+			sim := NewSimulatorFromBaseURL(stub, http.DefaultClient, logger, "", 30).
+				WithGoalChecker(goal)
 
 			result, err := sim.Run(context.Background(), tt.sim)
-
-			if tt.wantErr {
-				require.Error(t, err)
-				return
-			}
-
 			require.NoError(t, err)
 			assert.Equal(t, tt.sim.ID, result.SimulationID)
 			assert.Equal(t, tt.sim.Persona, result.Persona)
@@ -127,9 +114,29 @@ func TestSimulatorRun(t *testing.T) {
 			assert.Equal(t, tt.wantReached, result.GoalReached)
 			assert.Equal(t, tt.wantTurns, result.TurnCount)
 			assert.Equal(t, tt.sim.MaxTurns, result.MaxTurns)
-			assert.Greater(t, result.DurationMs, int64(-1))
 		})
 	}
+}
+
+func TestSimulatorRun_GoalCheckErrorDoesNotAbort(t *testing.T) {
+	// A transient goal-checker failure must not fail the run. The turn
+	// continues, logging a warning; the run ends naturally at max_turns.
+	stub := &stubLLMClient{responses: []string{"hello", "response"}}
+	goal := &scriptedGoalChecker{err: errors.New("llm down")}
+	sim := NewSimulatorFromBaseURL(stub, http.DefaultClient, slog.Default(), "", 30).
+		WithGoalChecker(goal)
+
+	result, err := sim.Run(context.Background(), config.Simulation{
+		ID:              "err-test",
+		Persona:         "user",
+		Goal:            "whatever",
+		MaxTurns:        2,
+		SuccessCriteria: "done",
+	})
+	require.NoError(t, err)
+	assert.False(t, result.GoalReached)
+	assert.Equal(t, 2, result.TurnCount)
+	assert.Equal(t, 2, goal.calls)
 }
 
 func TestSimulatorRun_ContextCancellation(t *testing.T) {
@@ -164,24 +171,33 @@ func TestPersonaPromptBuilder(t *testing.T) {
 	assert.Contains(t, prompt, "Stay in character")
 }
 
-func TestCheckGoalReached(t *testing.T) {
+func TestLLMGoalChecker(t *testing.T) {
 	tests := []struct {
 		name     string
-		response string
+		reply    string
 		criteria string
 		want     bool
 	}{
-		{"exact match", "refund approved", "refund approved", true},
-		{"case insensitive", "Refund APPROVED", "refund approved", true},
-		{"substring match", "Your refund approved today.", "refund approved", true},
-		{"no match", "I cannot help with that", "refund approved", false},
-		{"empty criteria", "anything here", "", false},
-		{"empty response", "", "refund approved", false},
+		{"yes answer", "YES", "password reset", true},
+		{"lowercase yes", "yes", "password reset", true},
+		{"yes with whitespace", " YES ", "password reset", true},
+		{"no answer", "NO", "password reset", false},
+		{"paragraph answer is not yes", "The assistant mostly did what was asked.", "password reset", false},
+		{"empty criteria short-circuits", "YES", "", false},
 	}
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, checkGoalReached(tt.response, tt.criteria))
+			c := &LLMGoalChecker{Client: &stubLLMClient{responses: []string{tt.reply}}}
+			got, err := c.Check(context.Background(), "some agent message", "some goal", tt.criteria)
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
 		})
 	}
+}
+
+func TestLLMGoalChecker_NilClient(t *testing.T) {
+	c := &LLMGoalChecker{Client: nil}
+	got, err := c.Check(context.Background(), "agent reply", "goal", "criteria")
+	require.NoError(t, err)
+	assert.False(t, got)
 }

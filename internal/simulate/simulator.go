@@ -29,24 +29,35 @@ type LLMClient interface {
 // Simulator orchestrates simulated conversations between a persona-driven user
 // and an AI agent under test per ADR-009.
 type Simulator struct {
-	llmClient  LLMClient
-	httpClient *http.Client
-	logger     *slog.Logger
-	agent      config.SimAgentConfig
-	runID      string
+	llmClient   LLMClient
+	httpClient  *http.Client
+	logger      *slog.Logger
+	agent       config.SimAgentConfig
+	runID       string
+	goalChecker GoalChecker
 }
 
 // NewSimulator creates a Simulator with the provided dependencies. The agent
 // configuration is captured by value so that a single Simulator instance
-// serves one configured run.
+// serves one configured run. Goal detection defaults to an LLM-backed
+// checker that reuses llmClient; override with WithGoalChecker.
 func NewSimulator(llmClient LLMClient, httpClient *http.Client, logger *slog.Logger, agent config.SimAgentConfig) *Simulator {
 	return &Simulator{
-		llmClient:  llmClient,
-		httpClient: httpClient,
-		logger:     logger,
-		agent:      agent,
-		runID:      newUUID(),
+		llmClient:   llmClient,
+		httpClient:  httpClient,
+		logger:      logger,
+		agent:       agent,
+		runID:       newUUID(),
+		goalChecker: &LLMGoalChecker{Client: llmClient},
 	}
+}
+
+// WithGoalChecker overrides the default LLMGoalChecker. Intended for
+// tests that want deterministic goal-reached decisions without calling
+// through the LLM client.
+func (s *Simulator) WithGoalChecker(c GoalChecker) *Simulator {
+	s.goalChecker = c
+	return s
 }
 
 // NewSimulatorFromBaseURL is a compatibility wrapper matching the original
@@ -109,7 +120,14 @@ func (s *Simulator) Run(ctx context.Context, sim config.Simulation) (*types.Simu
 
 		turnCount = turn + 1
 
-		if checkGoalReached(agentResp, sim.SuccessCriteria) {
+		reached, err := s.goalChecker.Check(ctx, agentResp, sim.Goal, sim.SuccessCriteria)
+		if err != nil {
+			s.logger.Warn("simulate: goal check failed",
+				slog.String("simulation_id", sim.ID),
+				slog.String("error", err.Error()),
+			)
+		}
+		if reached {
 			goalReached = true
 			break
 		}
@@ -358,15 +376,3 @@ func newUUID() string {
 	return h[0:8] + "-" + h[8:12] + "-" + h[12:16] + "-" + h[16:20] + "-" + h[20:32]
 }
 
-// checkGoalReached determines whether the agent response satisfies the success
-// criteria. An empty criteria string is never matched. Item 5 replaces this
-// substring match with LLM-judge-driven detection.
-func checkGoalReached(agentResponse, successCriteria string) bool {
-	if successCriteria == "" {
-		return false
-	}
-	return strings.Contains(
-		strings.ToLower(agentResponse),
-		strings.ToLower(successCriteria),
-	)
-}
