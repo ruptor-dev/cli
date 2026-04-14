@@ -1,5 +1,11 @@
 # Ruptor CLI — CLAUDE.md
 
+> **Launch work:** before any launch-related PR (goreleaser, cosign,
+> auth-to-platform, cloud feature flag flip, first public tag), read
+> `PRE-RELEASE.md` at the repo root and update it if you find a new
+> blocker. That file is the single living checklist for everything
+> that must be true before `ruptor v1` ships publicly.
+
 ## Read shared context FIRST
 
 Before any task, read these files (relative paths assume ~/dev/ruptor-dev/):
