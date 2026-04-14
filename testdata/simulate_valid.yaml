@@ -1,3 +1,4 @@
+version: "1"
 agent:
   name: support_agent
   base_url: http://localhost:3000

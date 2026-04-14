@@ -1,3 +1,4 @@
+version: "1"
 agent:
   name: support_agent
   entrypoint: python agent.py

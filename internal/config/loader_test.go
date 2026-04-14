@@ -11,6 +11,7 @@ import (
 )
 
 const validChaosYAML = `
+version: "1"
 agent:
   name: support_agent
   entrypoint: python agent.py
@@ -47,6 +48,7 @@ output:
 `
 
 const validSimulateYAML = `
+version: "1"
 agent:
   name: support_agent
   entrypoint: python agent.py
@@ -94,6 +96,35 @@ func TestLoadChaos(t *testing.T) {
 		{
 			name: "valid chaos config",
 			yaml: validChaosYAML,
+		},
+		{
+			name: "missing version",
+			yaml: `
+agent:
+  name: test
+proxy:
+  port: 8080
+  passthrough_url: https://example.com
+tests: []
+output:
+  format: json
+`,
+			wantErr: "version is required",
+		},
+		{
+			name: "unsupported version",
+			yaml: `
+version: "2"
+agent:
+  name: test
+proxy:
+  port: 8080
+  passthrough_url: https://example.com
+tests: []
+output:
+  format: json
+`,
+			wantErr: `version "2" is not supported`,
 		},
 		{
 			name:    "bad yaml syntax",
@@ -487,6 +518,7 @@ func TestChaosValidate_MultipleErrors(t *testing.T) {
 	err := cfg.Validate()
 	require.Error(t, err)
 	msg := err.Error()
+	assert.Contains(t, msg, "version is required")
 	assert.Contains(t, msg, "agent.name is required")
 	assert.Contains(t, msg, "proxy.port must be greater than 0")
 	assert.Contains(t, msg, "proxy.passthrough_url is required")
@@ -505,6 +537,7 @@ func TestSimulateValidate_MultipleErrors(t *testing.T) {
 	err := cfg.Validate()
 	require.Error(t, err)
 	msg := err.Error()
+	assert.Contains(t, msg, "version is required")
 	assert.Contains(t, msg, "agent.name is required")
 	assert.Contains(t, msg, "agent.base_url is required")
 	assert.Contains(t, msg, "simulations[0].id is required")

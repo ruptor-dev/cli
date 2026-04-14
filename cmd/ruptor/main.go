@@ -324,12 +324,14 @@ func runSimulate(ctx context.Context, cfgPath, outputPath, simFilter string) err
 	}
 
 	rpt := &types.ConversationReport{
-		AgentName:   cfg.Agent.Name,
-		RunAt:       time.Now(),
-		TotalSims:   len(results),
-		GoalReached: goalReached,
-		AvgScore:    avgScore,
-		Results:     results,
+		SchemaVersion: types.ReportSchemaVersion,
+		RuptorVersion: version,
+		AgentName:     cfg.Agent.Name,
+		RunAt:         time.Now(),
+		TotalSims:     len(results),
+		GoalReached:   goalReached,
+		AvgScore:      avgScore,
+		Results:       results,
 	}
 
 	if err := renderer.RenderSimulate(rpt); err != nil {

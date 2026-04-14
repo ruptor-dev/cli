@@ -7,10 +7,11 @@ import (
 
 // SimulateConfig represents the top-level configuration for simulation mode.
 type SimulateConfig struct {
-	Agent       SimAgentConfig    `yaml:"agent"`
-	Simulations []Simulation      `yaml:"simulations"`
+	Version     string              `yaml:"version"`
+	Agent       SimAgentConfig      `yaml:"agent"`
+	Simulations []Simulation        `yaml:"simulations"`
 	Evaluation  SimEvaluationConfig `yaml:"evaluation"`
-	Output      OutputConfig      `yaml:"output"`
+	Output      OutputConfig        `yaml:"output"`
 }
 
 // SimAgentConfig describes the agent under test in simulation mode.
@@ -41,6 +42,12 @@ type SimEvaluationConfig struct {
 // Validate checks all required fields and returns all validation errors joined together.
 func (c *SimulateConfig) Validate() error {
 	var errs []error
+
+	if c.Version == "" {
+		errs = append(errs, fmt.Errorf("version is required (expected %q)", SchemaVersion))
+	} else if c.Version != SchemaVersion {
+		errs = append(errs, fmt.Errorf("version %q is not supported (expected %q)", c.Version, SchemaVersion))
+	}
 
 	if c.Agent.Name == "" {
 		errs = append(errs, errors.New("agent.name is required"))

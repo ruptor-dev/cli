@@ -7,8 +7,14 @@ import (
 	"github.com/ruptor-dev/cli/pkg/types"
 )
 
+// SchemaVersion is the current chaos/simulate config schema version. Configs
+// must declare this value explicitly so that a future breaking change (v2)
+// can reject stale documents without guessing.
+const SchemaVersion = "1"
+
 // ChaosConfig represents the top-level configuration for chaos testing mode.
 type ChaosConfig struct {
+	Version    string           `yaml:"version"`
 	Agent      AgentConfig      `yaml:"agent"`
 	Proxy      ProxyConfig      `yaml:"proxy"`
 	Tests      []TestConfig     `yaml:"tests"`
@@ -60,6 +66,12 @@ type OutputConfig struct {
 // Validate checks all required fields and returns all validation errors joined together.
 func (c *ChaosConfig) Validate() error {
 	var errs []error
+
+	if c.Version == "" {
+		errs = append(errs, fmt.Errorf("version is required (expected %q)", SchemaVersion))
+	} else if c.Version != SchemaVersion {
+		errs = append(errs, fmt.Errorf("version %q is not supported (expected %q)", c.Version, SchemaVersion))
+	}
 
 	if c.Agent.Name == "" {
 		errs = append(errs, errors.New("agent.name is required"))
