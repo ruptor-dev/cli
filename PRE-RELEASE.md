@@ -104,7 +104,7 @@ Document but do not block launch on these.
       not. Sweep on 2026-04-14 found one hit — the `TODO(v1-launch)`
       in `internal/auth/keys.go` tracking the dev-keypair swap. It
       duplicated the Security checklist line above, so it was removed
-      in commit `d89cb14`. The canonical tracker for the key swap is
+      in commit `41b4e02`. The canonical tracker for the key swap is
       this file.
 - [x] `ruptor doctor` output eyeballed on a clean machine — no `nil`
       dereferences, no paths that assume `~/.ruptor/config.yaml`
