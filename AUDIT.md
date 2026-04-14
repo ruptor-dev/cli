@@ -215,7 +215,8 @@ The stack-swap PR (see §11) closed §8 item 9. Remaining items deserve isolated
 - **New v1 subcommands**: ~~`auth login|status|logout`~~ (landed),
   ~~`doctor`~~ (landed in `internal/doctor` + `cmd/ruptor/doctor.go`),
   ~~`update`~~ (landed in `internal/updater` + `cmd/ruptor/update.go`),
-  `sync`.
+  ~~`sync`~~ (landed in `internal/cloud/{client,sync}.go` +
+  `cmd/ruptor/sync.go`; gated by `CloudReportingEnabled`).
 - **Release + OSS hygiene**: `.goreleaser.yaml`, cosign signing, GitHub Actions release workflow, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, issue templates.
 - **Robustness Score**: retype `ReliabilityReport.Score` as `float64` in `[0.0, 1.0]`; update renderers.
 - **Chaos pipeline follow-ups**: `Recovered` signal (requires retry-aware proxy), agent-behavior transcript for LLM judge input, `Open report? [Y/n]` completion prompt.

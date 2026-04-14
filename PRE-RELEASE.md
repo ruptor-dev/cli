@@ -14,7 +14,10 @@ what "done" means for that line so later reviewers don't have to guess.
 - [ ] Verify `CloudReportingEnabled = false` in `internal/cloud/feature.go`
       stays `false` until the platform API (`https://api.ruptor.dev`) is
       live and the `--cloud` path has been exercised end-to-end against a
-      real backend — not just the test harness.
+      real backend — not just the test harness. The `ruptor sync` PR
+      added a real upload client (`internal/cloud/{client,sync}.go`)
+      gated on this flag; flipping the const enables uploads to start
+      immediately, so the platform must be ready first.
 
 ## Testing
 
