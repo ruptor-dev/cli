@@ -21,15 +21,21 @@ what "done" means for that line so later reviewers don't have to guess.
 
 ## Testing
 
-- [ ] Unit tests for `parseChaosResponse` + `parseConversationResponse` in
-      `internal/evaluator/llmjudge`. The package sits at 0 % coverage
-      today because the parsers only run inside `OpenAIJudge.Evaluate*`
-      calls; extract them or cover them directly.
-- [ ] Integration test that spawns the compiled `ruptor` binary against
-      an `httptest.Server` backend. Covers `cmd/ruptor` (currently 0 %)
-      end-to-end: `ruptor run` writes a report, `ruptor simulate` writes a
-      report, both print the completion screen, both return non-zero on
-      config errors.
+- [x] Unit tests for `parseChaosResponse` + `parseConversationResponse` in
+      `internal/evaluator/llmjudge`. White-box table-driven tests in
+      `internal/evaluator/llmjudge/parsers_test.go` cover canonical
+      verdicts, casing variants, fenced-code-block JSON, partial
+      objects, and malformed input. Package coverage 0 % → 44.2 %.
+- [x] Integration test that spawns the compiled `ruptor` binary against
+      an `httptest.Server` backend. `cmd/ruptor/integration_test.go`
+      builds the binary in `TestMain` and exercises every shipped
+      subcommand (`version`, `--help` advertises all 8 subcommands,
+      `validate` valid + invalid, `run` rejects bad config, `simulate`
+      requires `OPENAI_API_KEY`, `sync` waitlist gate, `update` exits 0
+      on network failure, `doctor` exits non-zero on failed check).
+      Note: `go test -cover` cannot see across the exec boundary, so
+      `cmd/ruptor` line coverage still reports 0 %. The exit-code +
+      output assertions are the contract.
 
 ## Known non-blockers
 
@@ -115,9 +121,11 @@ Document but do not block launch on these.
 Update the lines below whenever the underlying state changes. Keep
 counts honest — stale numbers here are worse than no numbers.
 
-- Tests: **207 passing** across 16 packages.
-- Coverage: ~57 % overall. Notable gaps — `cmd/ruptor` 0 %,
-  `internal/evaluator/llmjudge` 0 %, `internal/ui` 38.8 %.
+- Tests: **259 passing** across 18 packages.
+- Coverage: ~60 % overall. Notable gaps — `cmd/ruptor` 0 %
+  (subprocess tests not visible to `-cover`; see the integration
+  test note above), `internal/evaluator/llmjudge` 44.2 %,
+  `internal/ui` 37.1 %.
 - `make check`: green.
 - `make release-dry`: green — 5 archives, checksums, homebrew cask.
 - CI workflow: `.github/workflows/ci.yml`.
