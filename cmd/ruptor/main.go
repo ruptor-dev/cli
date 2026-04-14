@@ -25,7 +25,15 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const version = "0.1.0"
+// version, commit, and buildDate are overridden at release time by
+// goreleaser via -ldflags "-X main.version=… -X main.commit=…
+// -X main.buildDate=…". Dev builds keep the placeholder values so
+// `ruptor --version` is never silently empty.
+var (
+	version   = "0.0.0-dev"
+	commit    = "none"
+	buildDate = "unknown"
+)
 
 func main() {
 	rootCmd := newRootCmd()
@@ -622,6 +630,8 @@ func newVersionCmd() *cobra.Command {
 		Short: "Print Ruptor version",
 		Run: func(cmd *cobra.Command, args []string) {
 			ui.Printf("ruptor %s\n", version)
+			ui.Printf("  commit:     %s\n", commit)
+			ui.Printf("  built:      %s\n", buildDate)
 		},
 	}
 }
