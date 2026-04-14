@@ -20,6 +20,7 @@ import (
 	"github.com/ruptor-dev/cli/internal/proxy/faults"
 	"github.com/ruptor-dev/cli/internal/report"
 	"github.com/ruptor-dev/cli/internal/simulate"
+	"github.com/ruptor-dev/cli/internal/ui"
 	"github.com/ruptor-dev/cli/pkg/types"
 	"github.com/spf13/cobra"
 )
@@ -385,7 +386,7 @@ func newVersionCmd() *cobra.Command {
 		Use:   "version",
 		Short: "Print Ruptor version",
 		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Printf("ruptor %s\n", version)
+			ui.Printf("ruptor %s\n", version)
 		},
 	}
 }
