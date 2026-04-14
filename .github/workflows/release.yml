@@ -1,0 +1,52 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  # cosign keyless signs via the workflow's OIDC identity (id-token:
+  # write). contents: write lets goreleaser create the GitHub Release
+  # and upload assets. packages: write is for the homebrew-tap commit.
+  contents: write
+  id-token: write
+  packages: write
+
+jobs:
+  goreleaser:
+    name: goreleaser + cosign
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: "1.26.2"
+          cache: true
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v4
+
+      - name: Install syft
+        uses: anchore/sbom-action/download-syft@v1
+
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v7
+        with:
+          distribution: goreleaser
+          version: latest
+          args: release --clean
+        env:
+          # For the homebrew-tap commit, swap GITHUB_TOKEN for a
+          # fine-grained PAT with `contents: write` on
+          # ruptor-dev/homebrew-tap — store it as HOMEBREW_TAP_TOKEN in
+          # repo secrets and uncomment the env below when that secret
+          # exists.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}

@@ -67,36 +67,53 @@ Document but do not block launch on these.
 
 ## Before first public release
 
+- [x] `.goreleaser.yaml` exists and `make release-dry` produces the
+      expected artifact set locally: 5 archives (linux/darwin/windows ×
+      amd64/arm64 minus windows/arm64), sha-256 checksums, homebrew
+      cask. `goreleaser check` is green.
 - [ ] goreleaser + cosign pipeline exercised with a real tag (not
-      `goreleaser --snapshot`). Artifact list: multi-arch linux / darwin
-      / windows binaries, checksums, cosign signature, homebrew tap
-      update, GitHub Release with auto-generated changelog.
-- [ ] `CONTRIBUTING.md` reviewed against the current repo layout and
-      commit conventions. Every "run `make …`" line actually works.
-- [ ] `LICENSE` present at repo root. Apache 2.0 per `../knowledge/`.
-- [ ] `CODE_OF_CONDUCT.md` present at repo root.
+      `goreleaser --snapshot`). Blocked on the GitHub org + homebrew
+      tap creation; when unblocked, cut `v0.0.1-rc1`, watch the
+      `release` workflow, verify signatures with
+      `cosign verify-blob --certificate-identity-regexp …`, confirm
+      the tap repo receives a cask commit.
+- [x] `CONTRIBUTING.md` present at repo root. Review on a clean
+      checkout before v1 and confirm every `make …` line still works.
+- [x] `LICENSE` present at repo root (Apache 2.0 canonical text).
+- [x] `CODE_OF_CONDUCT.md` present at repo root (Contributor
+      Covenant v2.1 pointer + conduct@ruptor.dev contact).
+- [x] `.github/workflows/ci.yml` runs build + test + lint + vet on
+      push/PR to main.
+- [x] `.github/workflows/release.yml` runs on `v*` tags: cosign
+      installer → goreleaser release --clean with `id-token: write`
+      so keyless OIDC signing works.
+- [x] `.github/ISSUE_TEMPLATE/` (bug + feature) and
+      `.github/PULL_REQUEST_TEMPLATE.md` present.
 - [ ] Every `TODO` / `FIXME` in the code reviewed. None may be
       user-facing at runtime (`ruptor --help`, error messages, report
       output). `TODO(v2):` markers are fine; user-visible `TODO` is
       not.
 - [ ] `ruptor doctor` output eyeballed on a clean machine — no `nil`
       dereferences, no paths that assume `~/.ruptor/config.yaml`
-      already exists, no surfacing of secret values.
-- [ ] `ruptor --version` prints the version goreleaser embedded via
-      `-ldflags="-X main.version=$TAG"`. Confirm the `const version`
-      fallback in `cmd/ruptor/main.go` is overridden at build time and
-      not accidentally baked into the binary.
+      already exists, no surfacing of secret values. (The `doctor`
+      subcommand itself is still pending; AUDIT.md §10.)
+- [x] `ruptor version` prints the ldflags-injected version, commit,
+      and build date. Verified against a `make release-dry` artifact:
+      the packaged darwin/arm64 binary reports
+      `ruptor 0.0.1-next / commit: <sha> / built: <date>`.
 
 ## Pipeline status (maintained by CI + each PR)
 
 Update the lines below whenever the underlying state changes. Keep
 counts honest — stale numbers here are worse than no numbers.
 
-- Tests: **207 passing** across 16 packages (as of auth PR `3a72e85`)
-- Coverage: **57.5 %** overall. Notable gaps — `cmd/ruptor` 0 %,
+- Tests: **207 passing** across 16 packages.
+- Coverage: ~57 % overall. Notable gaps — `cmd/ruptor` 0 %,
   `internal/evaluator/llmjudge` 0 %, `internal/ui` 38.8 %.
 - `make check`: green.
-- Pushed commits ahead of public v0 baseline: 22 on `origin/main`.
+- `make release-dry`: green — 5 archives, checksums, homebrew cask.
+- CI workflow: `.github/workflows/ci.yml`.
+- Release workflow: `.github/workflows/release.yml` (fires on `v*`).
 
 ## How to use this file
 
