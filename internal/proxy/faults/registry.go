@@ -26,6 +26,7 @@ func NewFaultRegistry() *FaultRegistry {
 	r.Register(types.FaultInvalidJSON, NewInvalidJSONFault)
 	r.Register(types.FaultEmptyResponse, NewEmptyResponseFault)
 	r.Register(types.FaultRateLimit, NewRateLimitFault)
+	r.Register(types.FaultLLMError, NewLLMErrorFault)
 
 	return r
 }

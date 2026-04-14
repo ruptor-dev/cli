@@ -11,6 +11,8 @@ const (
 	FaultInvalidJSON   FaultType = "invalid_json"
 	FaultEmptyResponse FaultType = "empty_response"
 	FaultRateLimit     FaultType = "rate_limit"
+	FaultLLMError      FaultType = "llm_error"
+	FaultLLMTimeout    FaultType = "llm_timeout"
 )
 
 type Fault interface {

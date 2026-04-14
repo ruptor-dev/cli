@@ -48,6 +48,13 @@ tests:
     delay_ms: 8000
     probability: 1.0
 
+  - id: llm_error_on_chat
+    tool: /v1/chat/completions
+    fault: llm_error
+    status_code: 503
+    body: '{"error":{"message":"service unavailable","type":"server_error","code":"service_unavailable"}}'
+    probability: 1.0
+
 evaluation:
   max_iterations: 20
   timeout_s: 60
