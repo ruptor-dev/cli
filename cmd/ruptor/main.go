@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/rs/zerolog"
+	"github.com/ruptor-dev/cli/internal/cloud"
 	"github.com/ruptor-dev/cli/internal/config"
 	"github.com/ruptor-dev/cli/internal/evaluator"
 	"github.com/ruptor-dev/cli/internal/evaluator/llmjudge"
@@ -81,23 +83,25 @@ func newRootCmd() *cobra.Command {
 func newRunCmd() *cobra.Command {
 	var outputPath string
 	var testFilter string
+	var cloudFlag bool
 
 	cmd := &cobra.Command{
 		Use:   "run <config-file>",
 		Short: "Run chaos tests against an AI agent",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runChaos(cmd.Context(), args[0], outputPath, testFilter)
+			return runChaos(cmd.Context(), args[0], outputPath, testFilter, cloudFlag)
 		},
 	}
 
 	cmd.Flags().StringVar(&outputPath, "output", "", "output file path for the report")
 	cmd.Flags().StringVar(&testFilter, "test", "", "run only the test with this ID")
+	cmd.Flags().BoolVar(&cloudFlag, "cloud", false, "spool report to ~/.ruptor/pending/ for upload by `ruptor sync`")
 
 	return cmd
 }
 
-func runChaos(ctx context.Context, cfgPath, outputPath, testFilter string) error {
+func runChaos(ctx context.Context, cfgPath, outputPath, testFilter string, cloudFlag bool) error {
 	logger := rootLogger
 
 	cfg, err := config.LoadChaos(cfgPath)
@@ -158,6 +162,15 @@ func runChaos(ctx context.Context, cfgPath, outputPath, testFilter string) error
 
 	if err := renderer.RenderChaos(rpt); err != nil {
 		return fmt.Errorf("rendering chaos report: %w", err)
+	}
+
+	if cloudFlag {
+		if err := spoolReportForCloud(rpt, logger); err != nil {
+			// Spooling is best-effort: a failure must not turn an
+			// otherwise-successful chaos run into a failed exit. Log
+			// the error and continue to the completion screen.
+			logger.Warn().Err(err).Msg("ruptor: could not spool report to pending/")
+		}
 	}
 
 	ui.PrintCompletion(ui.CompletionSummary{
@@ -665,4 +678,36 @@ type simulateLLMAdapter struct {
 
 func (a *simulateLLMAdapter) Complete(ctx context.Context, messages []map[string]string, model string) (string, error) {
 	return a.client.CompleteMap(ctx, messages, model)
+}
+
+// spoolReportForCloud writes the chaos report JSON to
+// ~/.ruptor/pending/ for `ruptor sync` to pick up. The user-visible
+// follow-up depends on the cloud feature flag: with reporting still
+// disabled at build time we surface the waitlist line, otherwise we
+// note that the next sync will upload it. Writing happens either way
+// so the spool plumbing is exercised continuously and `ruptor sync`
+// has something to upload the moment the flag flips.
+func spoolReportForCloud(rpt *types.ReliabilityReport, logger zerolog.Logger) error {
+	settings, err := config.LoadSettings()
+	if err != nil {
+		return fmt.Errorf("loading settings: %w", err)
+	}
+	body, err := json.MarshalIndent(rpt, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshalling report: %w", err)
+	}
+	pendingDir := filepath.Join(settings.ConfigDir, cloud.PendingDirName)
+	path, err := cloud.WritePending(pendingDir, cloud.NewRunID("chaos"), body)
+	if err != nil {
+		return err
+	}
+	logger.Info().Str("path", path).Msg("ruptor: report spooled for cloud upload")
+
+	if !cloud.CloudReportingEnabled {
+		ui.Info("Cloud reporting is coming soon. Join the waitlist at https://ruptor.dev")
+		ui.Dim(fmt.Sprintf("    Report queued at %s", path))
+		return nil
+	}
+	ui.Info(fmt.Sprintf("Queued for upload — run `ruptor sync` (file: %s)", path))
+	return nil
 }
