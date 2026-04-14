@@ -58,6 +58,7 @@ func newRootCmd() *cobra.Command {
 	cmd.AddCommand(newSimulateCmd())
 	cmd.AddCommand(newValidateCmd())
 	cmd.AddCommand(newVersionCmd())
+	cmd.AddCommand(newAuthCmd())
 
 	return cmd
 }
