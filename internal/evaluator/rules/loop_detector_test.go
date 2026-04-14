@@ -3,8 +3,8 @@ package rules_test
 import (
 	"testing"
 
-	"github.com/faultforge/faultforge/internal/evaluator/rules"
-	"github.com/faultforge/faultforge/pkg/types"
+	"github.com/ruptor-dev/cli/internal/evaluator/rules"
+	"github.com/ruptor-dev/cli/pkg/types"
 	"github.com/stretchr/testify/assert"
 )
 

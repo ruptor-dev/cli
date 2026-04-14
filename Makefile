@@ -1,13 +1,13 @@
 .PHONY: build test lint run-example clean tools check
 
 BUILD_DIR  := ./bin
-BINARY     := $(BUILD_DIR)/faultforge
+BINARY     := $(BUILD_DIR)/ruptor
 COVERAGE   := coverage.out
 
 ## build: compile the binary
 build:
 	@mkdir -p $(BUILD_DIR)
-	go build -ldflags="-s -w" -o $(BINARY) ./cmd/faultforge
+	go build -ldflags="-s -w" -o $(BINARY) ./cmd/ruptor
 	@echo "✓ Built $(BINARY)"
 
 ## test: run all tests with race detector and coverage

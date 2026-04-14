@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/faultforge/faultforge/internal/config"
+	"github.com/ruptor-dev/cli/internal/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

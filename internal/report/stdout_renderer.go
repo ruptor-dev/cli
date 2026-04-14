@@ -5,7 +5,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/faultforge/faultforge/pkg/types"
+	"github.com/ruptor-dev/cli/pkg/types"
 )
 
 // StdoutRenderer pretty-prints reports to an io.Writer.
@@ -17,7 +17,7 @@ type StdoutRenderer struct {
 func (s *StdoutRenderer) RenderChaos(report *types.ReliabilityReport) error {
 	w := s.Writer
 
-	fmt.Fprintf(w, "\n%s FaultForge Reliability Report %s\n", strings.Repeat("\u2550", 3), strings.Repeat("\u2550", 3))
+	fmt.Fprintf(w, "\n%s Ruptor Reliability Report %s\n", strings.Repeat("\u2550", 3), strings.Repeat("\u2550", 3))
 	fmt.Fprintf(w, "Agent: %s  |  Run: %s\n", report.AgentName, report.RunAt.Format("2006-01-02 15:04:05"))
 	fmt.Fprintf(w, "Tests: %d  |  Passed: %d  |  Failed: %d  |  Score: %d%%\n", report.TotalTests, report.Passed, report.Failed, report.Score)
 	fmt.Fprintf(w, "\n%s Results %s\n", strings.Repeat("\u2500", 3), strings.Repeat("\u2500", 3))
@@ -58,7 +58,7 @@ func (s *StdoutRenderer) RenderChaos(report *types.ReliabilityReport) error {
 func (s *StdoutRenderer) RenderSimulate(report *types.ConversationReport) error {
 	w := s.Writer
 
-	fmt.Fprintf(w, "\n%s FaultForge Simulation Report %s\n", strings.Repeat("\u2550", 3), strings.Repeat("\u2550", 3))
+	fmt.Fprintf(w, "\n%s Ruptor Simulation Report %s\n", strings.Repeat("\u2550", 3), strings.Repeat("\u2550", 3))
 	fmt.Fprintf(w, "Agent: %s  |  Run: %s\n", report.AgentName, report.RunAt.Format("2006-01-02 15:04:05"))
 	fmt.Fprintf(w, "Simulations: %d  |  Goal Reached: %d  |  Avg Score: %.1f\n", report.TotalSims, report.GoalReached, report.AvgScore)
 	fmt.Fprintf(w, "\n%s Results %s\n", strings.Repeat("\u2500", 3), strings.Repeat("\u2500", 3))

@@ -7,7 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/faultforge/faultforge/pkg/types"
+	"github.com/ruptor-dev/cli/pkg/types"
 )
 
 // HTMLRenderer renders reports as HTML files using Go templates.
@@ -16,10 +16,10 @@ type HTMLRenderer struct {
 }
 
 const fallbackChaosHTML = `<!DOCTYPE html>
-<html><head><title>FaultForge Reliability Report</title>
+<html><head><title>Ruptor Reliability Report</title>
 <style>body{font-family:sans-serif;margin:2em}table{border-collapse:collapse;width:100%}th,td{border:1px solid #ccc;padding:8px;text-align:left}.pass{color:green}.fail{color:red}</style>
 </head><body>
-<h1>FaultForge Reliability Report</h1>
+<h1>Ruptor Reliability Report</h1>
 <p><strong>Agent:</strong> {{.AgentName}} | <strong>Run:</strong> {{.RunAt.Format "2006-01-02 15:04:05"}} | <strong>Score:</strong> {{.Score}}%</p>
 <p>Tests: {{.TotalTests}} | Passed: {{.Passed}} | Failed: {{.Failed}}</p>
 <table><tr><th>Status</th><th>Test ID</th><th>Fault</th><th>Tool</th><th>Duration</th><th>Judge</th></tr>
@@ -31,10 +31,10 @@ const fallbackChaosHTML = `<!DOCTYPE html>
 </table></body></html>`
 
 const fallbackSimulateHTML = `<!DOCTYPE html>
-<html><head><title>FaultForge Simulation Report</title>
+<html><head><title>Ruptor Simulation Report</title>
 <style>body{font-family:sans-serif;margin:2em}table{border-collapse:collapse;width:100%}th,td{border:1px solid #ccc;padding:8px;text-align:left}.reached{color:green}.missed{color:red}</style>
 </head><body>
-<h1>FaultForge Simulation Report</h1>
+<h1>Ruptor Simulation Report</h1>
 <p><strong>Agent:</strong> {{.AgentName}} | <strong>Run:</strong> {{.RunAt.Format "2006-01-02 15:04:05"}} | <strong>Avg Score:</strong> {{printf "%.1f" .AvgScore}}</p>
 <p>Simulations: {{.TotalSims}} | Goal Reached: {{.GoalReached}}</p>
 <table><tr><th>Status</th><th>Simulation</th><th>Persona</th><th>Goal</th><th>Turns</th><th>Score</th><th>Duration</th></tr>

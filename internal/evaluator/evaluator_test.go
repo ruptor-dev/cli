@@ -5,9 +5,9 @@ import (
 	"log/slog"
 	"testing"
 
-	"github.com/faultforge/faultforge/internal/evaluator"
-	"github.com/faultforge/faultforge/internal/evaluator/llmjudge"
-	"github.com/faultforge/faultforge/pkg/types"
+	"github.com/ruptor-dev/cli/internal/evaluator"
+	"github.com/ruptor-dev/cli/internal/evaluator/llmjudge"
+	"github.com/ruptor-dev/cli/pkg/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/faultforge/faultforge/pkg/types"
+	"github.com/ruptor-dev/cli/pkg/types"
 )
 
 // RateLimitFault returns HTTP 429 with a Retry-After header and JSON body.

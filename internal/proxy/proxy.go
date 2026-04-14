@@ -11,8 +11,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/faultforge/faultforge/internal/config"
-	"github.com/faultforge/faultforge/internal/proxy/faults"
+	"github.com/ruptor-dev/cli/internal/config"
+	"github.com/ruptor-dev/cli/internal/proxy/faults"
 )
 
 const (

@@ -3,7 +3,7 @@ package faults
 import (
 	"net/http"
 
-	"github.com/faultforge/faultforge/pkg/types"
+	"github.com/ruptor-dev/cli/pkg/types"
 )
 
 // TimeoutFault immediately returns an HTTP 504 Gateway Timeout,

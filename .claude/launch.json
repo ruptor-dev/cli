@@ -2,15 +2,15 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "faultforge-chaos",
+      "name": "ruptor-chaos",
       "runtimeExecutable": "go",
-      "runtimeArgs": ["run", "./cmd/faultforge", "run", "configs/chaos.example.yaml"],
+      "runtimeArgs": ["run", "./cmd/ruptor", "run", "configs/chaos.example.yaml"],
       "port": 8080
     },
     {
-      "name": "faultforge-simulate",
+      "name": "ruptor-simulate",
       "runtimeExecutable": "go",
-      "runtimeArgs": ["run", "./cmd/faultforge", "simulate", "configs/simulate.example.yaml"],
+      "runtimeArgs": ["run", "./cmd/ruptor", "simulate", "configs/simulate.example.yaml"],
       "port": 3000
     }
   ]

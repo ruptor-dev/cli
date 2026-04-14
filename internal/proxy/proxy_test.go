@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/faultforge/faultforge/internal/config"
-	"github.com/faultforge/faultforge/internal/proxy"
-	"github.com/faultforge/faultforge/internal/proxy/faults"
-	"github.com/faultforge/faultforge/pkg/types"
+	"github.com/ruptor-dev/cli/internal/config"
+	"github.com/ruptor-dev/cli/internal/proxy"
+	"github.com/ruptor-dev/cli/internal/proxy/faults"
+	"github.com/ruptor-dev/cli/pkg/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

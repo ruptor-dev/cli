@@ -3,7 +3,7 @@ package faults
 import (
 	"testing"
 
-	"github.com/faultforge/faultforge/pkg/types"
+	"github.com/ruptor-dev/cli/pkg/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

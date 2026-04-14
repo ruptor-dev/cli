@@ -3,7 +3,7 @@ package faults
 import (
 	"fmt"
 
-	"github.com/faultforge/faultforge/pkg/types"
+	"github.com/ruptor-dev/cli/pkg/types"
 )
 
 // FaultFactory is a constructor function that produces a Fault from a FaultConfig.

@@ -1,4 +1,4 @@
-module github.com/faultforge/faultforge
+module github.com/ruptor-dev/cli
 
 go 1.22
 

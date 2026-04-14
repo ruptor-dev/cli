@@ -1,6 +1,6 @@
 package rules
 
-import "github.com/faultforge/faultforge/pkg/types"
+import "github.com/ruptor-dev/cli/pkg/types"
 
 // RecoveryDetector detects recovery behavior based on error and recovery state.
 type RecoveryDetector struct{}

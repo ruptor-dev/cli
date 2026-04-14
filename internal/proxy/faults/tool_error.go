@@ -3,7 +3,7 @@ package faults
 import (
 	"net/http"
 
-	"github.com/faultforge/faultforge/pkg/types"
+	"github.com/ruptor-dev/cli/pkg/types"
 )
 
 // ToolErrorFault returns a configurable HTTP error status with a JSON body.

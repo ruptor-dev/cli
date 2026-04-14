@@ -1,6 +1,6 @@
 package rules
 
-import "github.com/faultforge/faultforge/pkg/types"
+import "github.com/ruptor-dev/cli/pkg/types"
 
 // LoopDetector detects infinite loop behavior based on iteration count.
 type LoopDetector struct {

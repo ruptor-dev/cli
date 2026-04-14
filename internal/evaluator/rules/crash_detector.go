@@ -1,6 +1,6 @@
 package rules
 
-import "github.com/faultforge/faultforge/pkg/types"
+import "github.com/ruptor-dev/cli/pkg/types"
 
 // CrashDetector detects crash behavior based on HTTP status codes.
 type CrashDetector struct{}

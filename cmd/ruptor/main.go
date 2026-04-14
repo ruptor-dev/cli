@@ -12,15 +12,15 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/faultforge/faultforge/internal/config"
-	"github.com/faultforge/faultforge/internal/evaluator"
-	"github.com/faultforge/faultforge/internal/evaluator/llmjudge"
-	"github.com/faultforge/faultforge/internal/llmclient"
-	"github.com/faultforge/faultforge/internal/proxy"
-	"github.com/faultforge/faultforge/internal/proxy/faults"
-	"github.com/faultforge/faultforge/internal/report"
-	"github.com/faultforge/faultforge/internal/simulate"
-	"github.com/faultforge/faultforge/pkg/types"
+	"github.com/ruptor-dev/cli/internal/config"
+	"github.com/ruptor-dev/cli/internal/evaluator"
+	"github.com/ruptor-dev/cli/internal/evaluator/llmjudge"
+	"github.com/ruptor-dev/cli/internal/llmclient"
+	"github.com/ruptor-dev/cli/internal/proxy"
+	"github.com/ruptor-dev/cli/internal/proxy/faults"
+	"github.com/ruptor-dev/cli/internal/report"
+	"github.com/ruptor-dev/cli/internal/simulate"
+	"github.com/ruptor-dev/cli/pkg/types"
 	"github.com/spf13/cobra"
 )
 
@@ -35,8 +35,8 @@ func main() {
 
 func newRootCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "faultforge",
-		Short: "FaultForge - chaos testing and simulation for AI agents",
+		Use:   "ruptor",
+		Short: "Ruptor - chaos testing and simulation for AI agents",
 		PersistentPreRun: func(cmd *cobra.Command, args []string) {
 			logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
 				Level: slog.LevelInfo,
@@ -146,7 +146,7 @@ func runChaos(ctx context.Context, cfgPath, outputPath, testFilter string) error
 		proxyErrCh <- p.Start(ctx)
 	}()
 
-	logger.Info("faultforge chaos proxy starting",
+	logger.Info("ruptor chaos proxy starting",
 		slog.String("agent", cfg.Agent.Name),
 		slog.Int("tests", len(tests)),
 		slog.Int("port", cfg.Proxy.Port),
@@ -264,7 +264,7 @@ func runSimulate(ctx context.Context, cfgPath, outputPath, simFilter string) err
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	logger.Info("faultforge simulation starting",
+	logger.Info("ruptor simulation starting",
 		slog.String("agent", cfg.Agent.Name),
 		slog.Int("simulations", len(sims)),
 	)
@@ -383,9 +383,9 @@ func runValidate(cfgPath string) error {
 func newVersionCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "version",
-		Short: "Print FaultForge version",
+		Short: "Print Ruptor version",
 		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Printf("faultforge %s\n", version)
+			fmt.Printf("ruptor %s\n", version)
 		},
 	}
 }

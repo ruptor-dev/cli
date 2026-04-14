@@ -3,7 +3,7 @@ package llmjudge
 import (
 	"context"
 
-	"github.com/faultforge/faultforge/pkg/types"
+	"github.com/ruptor-dev/cli/pkg/types"
 )
 
 // Judge evaluates agent behavior using an LLM.

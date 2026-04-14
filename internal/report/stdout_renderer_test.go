@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/faultforge/faultforge/pkg/types"
+	"github.com/ruptor-dev/cli/pkg/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -95,7 +95,7 @@ func TestStdoutRenderer_RenderChaos(t *testing.T) {
 			name:   "renders all key fields",
 			report: sampleChaosReport(),
 			contains: []string{
-				"FaultForge Reliability Report",
+				"Ruptor Reliability Report",
 				"test-agent",
 				"Score: 67%",
 				"Tests: 3",
@@ -140,7 +140,7 @@ func TestStdoutRenderer_RenderSimulate(t *testing.T) {
 
 	output := buf.String()
 	expected := []string{
-		"FaultForge Simulation Report",
+		"Ruptor Simulation Report",
 		"test-agent",
 		"Simulations: 2",
 		"Goal Reached: 1",

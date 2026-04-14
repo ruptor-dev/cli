@@ -3,7 +3,7 @@ package faults
 import (
 	"net/http"
 
-	"github.com/faultforge/faultforge/pkg/types"
+	"github.com/ruptor-dev/cli/pkg/types"
 )
 
 // EmptyResponseFault returns HTTP 200 with an empty body.

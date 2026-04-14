@@ -7,8 +7,8 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/faultforge/faultforge/internal/llmclient"
-	"github.com/faultforge/faultforge/pkg/types"
+	"github.com/ruptor-dev/cli/internal/llmclient"
+	"github.com/ruptor-dev/cli/pkg/types"
 )
 
 // OpenAIJudge evaluates agent behavior using the OpenAI chat completions API.

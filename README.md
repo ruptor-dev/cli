@@ -1,8 +1,8 @@
-# FaultForge
+# Ruptor
 
 Reliability testing for AI agents — Chaos Engineering meets LLM systems.
 
-FaultForge helps you find out how your AI agent behaves when things go wrong:
+Ruptor helps you find out how your AI agent behaves when things go wrong:
 tool timeouts, invalid JSON, rate limits, empty responses. Before your users do.
 
 ---
@@ -11,15 +11,15 @@ tool timeouts, invalid JSON, rate limits, empty responses. Before your users do.
 
 | Module | What it does |
 |---|---|
-| `faultforge run` | Injects failures into tool calls and observes agent behavior |
-| `faultforge simulate` | Simulates real users to evaluate goal completion and conversation quality |
+| `ruptor run` | Injects failures into tool calls and observes agent behavior |
+| `ruptor simulate` | Simulates real users to evaluate goal completion and conversation quality |
 
 ---
 
 ## Installation
 
 ```bash
-go install github.com/faultforge/faultforge/cmd/faultforge@latest
+go install github.com/ruptor-dev/cli/cmd/ruptor@latest
 ```
 
 > Requires Go 1.22+
@@ -28,7 +28,7 @@ go install github.com/faultforge/faultforge/cmd/faultforge@latest
 
 ## Quickstart — Chaos Testing
 
-**1. Point your agent's tools at FaultForge:**
+**1. Point your agent's tools at Ruptor:**
 
 ```bash
 export TOOL_BASE_URL=http://localhost:8080
@@ -67,9 +67,9 @@ output:
 **3. Run:**
 
 ```bash
-faultforge run chaos.yaml
-faultforge run chaos.yaml --output report.html
-faultforge run chaos.yaml --test timeout_on_search
+ruptor run chaos.yaml
+ruptor run chaos.yaml --output report.html
+ruptor run chaos.yaml --test timeout_on_search
 ```
 
 ---
@@ -102,8 +102,8 @@ output:
 **2. Run:**
 
 ```bash
-faultforge simulate simulate.yaml
-faultforge simulate simulate.yaml --sim frustrated_user
+ruptor simulate simulate.yaml
+ruptor simulate simulate.yaml --sim frustrated_user
 ```
 
 ---

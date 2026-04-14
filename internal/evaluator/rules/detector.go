@@ -1,6 +1,6 @@
 package rules
 
-import "github.com/faultforge/faultforge/pkg/types"
+import "github.com/ruptor-dev/cli/pkg/types"
 
 // DetectionInput bundles the signals used by detectors. A single struct keeps
 // the Detector interface stable as new detectors add new signal sources.

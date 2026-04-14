@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/faultforge/faultforge/pkg/types"
+	"github.com/ruptor-dev/cli/pkg/types"
 )
 
 // SlowResponseFault introduces an artificial delay before forwarding the response.

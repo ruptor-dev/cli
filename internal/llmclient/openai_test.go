@@ -8,7 +8,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/faultforge/faultforge/internal/llmclient"
+	"github.com/ruptor-dev/cli/internal/llmclient"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

@@ -3,7 +3,7 @@ package faults
 import (
 	"net/http"
 
-	"github.com/faultforge/faultforge/pkg/types"
+	"github.com/ruptor-dev/cli/pkg/types"
 )
 
 const defaultBrokenJSON = `{"result": INVALID, "data": [1, 2,}`

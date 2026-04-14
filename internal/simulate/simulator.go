@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/faultforge/faultforge/internal/config"
-	"github.com/faultforge/faultforge/pkg/types"
+	"github.com/ruptor-dev/cli/internal/config"
+	"github.com/ruptor-dev/cli/pkg/types"
 )
 
 // LLMClient abstracts the language model used for generating simulated user

@@ -1,6 +1,6 @@
 package faults
 
-import "github.com/faultforge/faultforge/pkg/types"
+import "github.com/ruptor-dev/cli/pkg/types"
 
 // FaultConfig holds the configuration for constructing any fault type.
 type FaultConfig struct {

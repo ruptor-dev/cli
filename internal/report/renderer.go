@@ -3,7 +3,7 @@ package report
 import (
 	"os"
 
-	"github.com/faultforge/faultforge/pkg/types"
+	"github.com/ruptor-dev/cli/pkg/types"
 )
 
 // Renderer defines the interface for rendering chaos and simulation reports.

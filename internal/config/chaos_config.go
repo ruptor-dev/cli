@@ -4,7 +4,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/faultforge/faultforge/pkg/types"
+	"github.com/ruptor-dev/cli/pkg/types"
 )
 
 // ChaosConfig represents the top-level configuration for chaos testing mode.

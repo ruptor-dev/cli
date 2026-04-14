@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/faultforge/faultforge/internal/evaluator/llmjudge"
-	"github.com/faultforge/faultforge/internal/evaluator/rules"
-	"github.com/faultforge/faultforge/pkg/types"
+	"github.com/ruptor-dev/cli/internal/evaluator/llmjudge"
+	"github.com/ruptor-dev/cli/internal/evaluator/rules"
+	"github.com/ruptor-dev/cli/pkg/types"
 )
 
 // ChaosEvaluator evaluates agent behavior during chaos testing using
