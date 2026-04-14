@@ -98,10 +98,14 @@ Document but do not block launch on these.
       so keyless OIDC signing works.
 - [x] `.github/ISSUE_TEMPLATE/` (bug + feature) and
       `.github/PULL_REQUEST_TEMPLATE.md` present.
-- [ ] Every `TODO` / `FIXME` in the code reviewed. None may be
+- [x] Every `TODO` / `FIXME` in the code reviewed. None may be
       user-facing at runtime (`ruptor --help`, error messages, report
       output). `TODO(v2):` markers are fine; user-visible `TODO` is
-      not.
+      not. Sweep on 2026-04-14 found one hit — the `TODO(v1-launch)`
+      in `internal/auth/keys.go` tracking the dev-keypair swap. It
+      duplicated the Security checklist line above, so it was removed
+      in commit `d89cb14`. The canonical tracker for the key swap is
+      this file.
 - [x] `ruptor doctor` output eyeballed on a clean machine — no `nil`
       dereferences, no paths that assume `~/.ruptor/config.yaml`
       already exists, no surfacing of secret values. Subcommand
@@ -121,8 +125,8 @@ Document but do not block launch on these.
 Update the lines below whenever the underlying state changes. Keep
 counts honest — stale numbers here are worse than no numbers.
 
-- Tests: **259 passing** across 18 packages.
-- Coverage: ~60 % overall. Notable gaps — `cmd/ruptor` 0 %
+- Tests: **266 passing** across 18 packages.
+- Coverage: ~59 % overall. Notable gaps — `cmd/ruptor` 0 %
   (subprocess tests not visible to `-cover`; see the integration
   test note above), `internal/evaluator/llmjudge` 44.2 %,
   `internal/ui` 37.1 %.
