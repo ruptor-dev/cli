@@ -186,10 +186,37 @@ Items 1–2 are mechanical and unblock everything else. Items 3–8 close gaps a
 
 ## 9. Applied in this audit pass
 
-_(Updated after fixes are merged. For now: nothing applied — audit-only pass.)_
+Punch-list items 1–8 landed as one commit each on `main`:
+
+| Item | Commit | Summary |
+|---|---|---|
+| 0 (prep) | `85598b8` | `.gitignore` for build artifacts + OS files |
+| 0 (prep) | `78e6f25` | Squash pre-audit WIP (detector interface unification, rng injection, ConversationHistory on result, llmclient extraction, doc cleanup) |
+| 0 (prep) | `8d531ff` | Add `CLAUDE.md`, `AUDIT.md`, `docs/superpowers/specs/SKILL-*.md`; drop stale `CLAUDE_CODE_PROMPT.md` |
+| 1 | `d29737a` | Rename `faultforge` → `ruptor` (module, cmd dir, binary, strings, imports, templates) |
+| 2 | `21986a7` | Route `version` cmd through new `internal/ui/` boundary |
+| 8 | `9926349` | Port auto-detect on startup (ADR-008) |
+| 7 | `2a9b30d` | Extract judge prompts to embedded `.txt` files |
+| 6 | `151fd6e` | `version: "1"` required in configs; `schema_version` + `ruptor_version` in reports (ADR-007) |
+| 4 | `4fd41ec` | Full ADR-009 simulate contract (response priority, `X-Ruptor-*` headers, auth, metadata, env-var token) |
+| 5 | `6b3e93f` | `GoalChecker` interface + LLM-backed default (replaces substring match) |
+| 3 | `b174c56` | Proxy observations + end-to-end chaos report pipeline |
+
+Test suite: **143 passing** across 13 packages. `go build ./...` and `go vet ./...` both green.
 
 ---
 
-## 10. Deferred from this audit pass to later PRs
+## 10. Deferred to later PRs
 
-All items in §8 — this audit file is read-only relative to the codebase. Renames + fixes will land in follow-up PRs per CLAUDE.md step 3 onward. The maintainer should decide whether to stack the rename (§8 item 1) on top of the current dirty working tree (`git status` shows 15 modified files + untracked `CLAUDE.md`) or to land the dirty state first.
+Everything in §8 items 9–15. These are the full v1 stack swap and OSS hygiene, and each deserves an isolated PR per CLAUDE.md "one logical change per PR":
+
+- **Stack swap**: zerolog (replace slog), viper (config hierarchy + `~/.ruptor/config.yaml` + env precedence), bubbletea + lipgloss v2 + bubbles (expand `internal/ui/` beyond the stub), `cenkalti/backoff/v4`, `go.opentelemetry.io/otel` v1, Go 1.26.2, cobra v2.5.1.
+- **New packages**: `internal/auth/` (OAuth device flow), `internal/cloud/` (`CloudReportingEnabled = false` feature flag + pending-report spooler), `internal/telemetry/` (OTel opt-in), `internal/proxy/mcp/` (JSON-RPC 2.0 tool call interception).
+- **New v1 faults**: `llm_error`, `llm_timeout` (enum + handlers + tests).
+- **New v1 subcommands**: `auth login|status|logout`, `doctor`, `update`, `sync`.
+- **Release + OSS hygiene**: `.goreleaser.yaml`, cosign signing, GitHub Actions release workflow, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, issue templates.
+- **Robustness Score**: retype `ReliabilityReport.Score` as `float64` in `[0.0, 1.0]`; update renderers.
+- **Chaos pipeline follow-ups**: `Recovered` signal (requires retry-aware proxy), agent-behavior transcript for LLM judge input, `RUPTOR_PROXY_PORT` env var (lands with the viper work).
+- **TUI**: Bubbletea live progress, Ruptor theme, `Open report? [Y/n]` prompt.
+
+`ruptor run` is now wired end-to-end (proxy → observations → evaluator → report) but the Robustness Score format and the Bubbletea TUI remain the biggest visible gaps before a v1 tag.
