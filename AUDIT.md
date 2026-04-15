@@ -236,6 +236,22 @@ The stack-swap PR (see §11) closed §8 item 9. Remaining items deserve isolated
   `TestRun_CloudDisabled_ShowsComingSoon` pins the disabled-path
   behaviour. Policy documented in CLAUDE.md §Feature flag.
 
+### Open bugs
+
+- **Proxy hangs on agent disconnect (2026-04-14).** When an experiment
+  uses `tool_timeout` and the agent-side client gives up (closes its
+  HTTP connection or hits its own timeout), the proxy does not detect
+  the client-side close and the experiment never transitions out of
+  the in-flight state. `ruptor run` ends up hanging indefinitely
+  waiting for the observation that will never land. Surfaces in
+  `examples/01-quickstart` whenever the agent request timeout is
+  shorter than `delay_ms`. Short-term mitigation: keep the agent
+  request timeout longer than the fault's `delay_ms`. Proper fix:
+  have the proxy watch `r.Context().Done()` (or equivalent) during a
+  `tool_timeout` hold and mark the observation as `client_closed` the
+  moment it fires, releasing the experiment. Requires a new
+  `Observation.ClientClosed` signal and corresponding UI status.
+
 ### Known non-blocking issues
 
 - **`docs/superpowers/specs/SKILL-proxy.md` is out of sync with the code.** The doc describes an aspirational `FaultHandler { Name(), CanHandle(), Inject(ctx, req, next) }` chain-of-responsibility contract with `ProxyRequest` / `HandlerFunc` types that do not exist in `pkg/types/` or `internal/proxy/`. The six shipped faults (plus `llm_error`, `llm_timeout`) all implement the simpler `types.Fault { Type(), Inject(w, r) error }` interface behind a `FaultRegistry` + factory. Each new fault follows that pattern for consistency. Either refactor all nine faults to match the doc, or rewrite the doc to match the code — do not accept a review note asking to follow the doc verbatim until that reconciliation happens.

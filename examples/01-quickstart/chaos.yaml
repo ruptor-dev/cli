@@ -15,7 +15,7 @@ tests:
   - id: search_timeout
     tool: /search
     fault: tool_timeout
-    delay_ms: 30000
+    delay_ms: 5000
     probability: 1.0
 
   - id: search_invalid_json
