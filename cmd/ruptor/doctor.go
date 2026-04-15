@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
+	"strconv"
 
 	"github.com/ruptor-dev/cli/internal/config"
 	"github.com/ruptor-dev/cli/internal/doctor"
@@ -28,6 +30,11 @@ func runDoctor(ctx context.Context) error {
 	if s, err := config.LoadSettings(); err == nil {
 		opts.ConfigDir = s.ConfigDir
 		opts.CloudURL = s.CloudURL
+	}
+	if v := os.Getenv("RUPTOR_PROXY_PORT"); v != "" {
+		if p, err := strconv.Atoi(v); err == nil {
+			opts.Port = p
+		}
 	}
 	results := doctor.Run(ctx, opts)
 	renderDoctorResults(results)

@@ -216,6 +216,21 @@ reserved for real local-environment failures.
 When `CloudReportingEnabled = true` the checks perform their real work
 and can fail the doctor run the usual way.
 
+### Cloud integration tests
+
+Any test that exercises the *enabled-path* behaviour of a cloud check
+(reachability, auth) MUST be gated:
+
+1. Skip when `cloud.CloudReportingEnabled == false`.
+2. Skip when `RUPTOR_INTEGRATION` env var is not `"true"`.
+
+Default CI runs with the flag off and the env var unset, so these tests
+skip and **never** reach `api.ruptor.dev`. They run only when a human
+opts in with `RUPTOR_INTEGRATION=true go test ./...` on a build with the
+flag flipped on. Use the `requireCloudIntegration(t)` helper in
+`internal/doctor/doctor_test.go` as the canonical gate. Never hit the
+real platform from default CI.
+
 ## Retry with jitter (cenkalti/backoff v4)
 
 Used in: reporting client, LLM judge calls, auth token refresh.

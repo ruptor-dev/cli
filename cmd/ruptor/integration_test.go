@@ -14,6 +14,8 @@ package main_test
 
 import (
 	"bytes"
+	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -154,16 +156,46 @@ func TestUpdateExitsZeroOnNetworkFailure(t *testing.T) {
 	assert.Equal(t, 0, code)
 }
 
-func TestDoctorExitsNonZeroOnFailedCheck(t *testing.T) {
-	// With HOME pointed at an empty tempdir there is no token and
-	// (in CI) no DNS for api.ruptor.dev — the cloud-reachability
-	// check must fail and the binary must exit 1. Auth check stays
-	// a Warn ("not logged in") so it does not affect the exit code.
+func TestDoctorExitsNonZeroOnLocalFailedCheck(t *testing.T) {
+	// Only a LOCAL check failure should fail the doctor. We hold a
+	// listener on an ephemeral port and point the doctor at it via
+	// RUPTOR_PROXY_PORT — the port probe hits EADDRINUSE and marks
+	// the row as ✗, which must drive exit 1. Cloud-side warnings
+	// (⚠ coming soon while CloudReportingEnabled=false) must not.
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	defer l.Close()
+	port := l.Addr().(*net.TCPAddr).Port
+
+	cmd := exec.Command(binPath, "doctor")
+	cmd.Env = append(os.Environ(),
+		"HOME="+t.TempDir(),
+		"NO_COLOR=1",
+		"TERM=dumb",
+		fmt.Sprintf("RUPTOR_PROXY_PORT=%d", port),
+	)
+	var buf bytes.Buffer
+	cmd.Stdout = &buf
+	cmd.Stderr = &buf
+	err = cmd.Run()
+	var ee *exec.ExitError
+	require.True(t, asExitError(err, &ee), "doctor should exit with non-zero status\n%s", buf.String())
+	assert.Equal(t, 1, ee.ExitCode(), "doctor must exit 1 on local check failure\n%s", buf.String())
+	assert.Contains(t, buf.String(), "Proxy port")
+	assert.Contains(t, buf.String(), "port")
+}
+
+func TestDoctorExitsZeroWhenCloudDisabled(t *testing.T) {
+	// On a clean machine with CloudReportingEnabled=false every local
+	// check passes and the cloud rows surface as ⚠ "coming soon".
+	// Contract: exit 0, warnings do not propagate to the exit code.
 	out, code := runRuptor(t, "doctor")
-	assert.NotEqual(t, 0, code, "doctor must exit non-zero when any check fails\n%s", out)
+	assert.Equal(t, 0, code, "doctor must exit 0 when local checks pass and cloud is disabled\n%s", out)
 	assert.Contains(t, out, "Ruptor doctor")
 	assert.Contains(t, out, "Go runtime")
+	assert.Contains(t, out, "Cloud reachability")
 	assert.Contains(t, out, "Authentication")
+	assert.Contains(t, out, "coming soon")
 }
 
 // repoPath resolves a path relative to the cli/ repo root regardless
