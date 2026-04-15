@@ -31,10 +31,10 @@ jobs:
           cache: true
 
       - name: Install cosign
-        uses: sigstore/cosign-installer@v4
+        uses: sigstore/cosign-installer@v4.1.0
 
       - name: Install syft
-        uses: anchore/sbom-action/download-syft@v1
+        uses: anchore/sbom-action/download-syft@v0
 
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v7
