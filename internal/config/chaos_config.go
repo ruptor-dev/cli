@@ -23,9 +23,19 @@ type ChaosConfig struct {
 }
 
 // AgentConfig describes the agent under test in chaos mode.
+// Mode selects the process lifecycle:
+//   - "oneshot" (default): ruptor launches the entrypoint once per
+//     experiment and waits for it to exit or for timeout_s.
+//   - "persistent": ruptor launches the entrypoint once before the
+//     first experiment and stops it after the last. Long-running HTTP
+//     servers (Flask, Bubbletea-backed shells) use this mode.
+//
+// An empty Entrypoint turns the runner off entirely and the user is
+// expected to manage the agent process externally.
 type AgentConfig struct {
 	Name       string            `yaml:"name"`
 	Entrypoint string            `yaml:"entrypoint"`
+	Mode       string            `yaml:"mode"`
 	Env        map[string]string `yaml:"env"`
 }
 

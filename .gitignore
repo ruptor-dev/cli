@@ -7,6 +7,9 @@ coverage.out
 
 # Reports
 /reports/
+examples/**/reports/
+examples/**/.venv/
+examples/**/_mock_tool_server.py
 
 # Editor / OS
 .DS_Store

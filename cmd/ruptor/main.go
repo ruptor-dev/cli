@@ -3,12 +3,14 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -21,6 +23,7 @@ import (
 	"github.com/ruptor-dev/cli/internal/proxy"
 	"github.com/ruptor-dev/cli/internal/proxy/faults"
 	"github.com/ruptor-dev/cli/internal/report"
+	"github.com/ruptor-dev/cli/internal/runner"
 	"github.com/ruptor-dev/cli/internal/simulate"
 	"github.com/ruptor-dev/cli/internal/ui"
 	"github.com/ruptor-dev/cli/pkg/types"
@@ -149,18 +152,35 @@ func runChaos(ctx context.Context, cfgPath, outputPath, testFilter string, cloud
 		Int("port", cfg.Proxy.Port).
 		Msg("ruptor chaos proxy starting")
 
+	runDir, err := newRunLogDir()
+	if err != nil {
+		logger.Warn().Err(err).Msg("could not create run log dir; agent stdout will go to a temp file")
+	}
+
+	durations := newDurationTracker()
+	runStart := time.Now()
+	orchErrCh := make(chan error, 1)
+	go func() {
+		orchErrCh <- orchestrateExperiments(ctx, stop, cfg, tests, p, runDir, durations, logger)
+	}()
+
 	if err := runChaosTUI(ctx, stop, cfg, tests, p); err != nil {
 		return err
+	}
+
+	if err := <-orchErrCh; err != nil && !errors.Is(err, context.Canceled) {
+		logger.Warn().Err(err).Msg("experiment orchestrator returned error")
 	}
 
 	if err := waitForProxy(ctx, proxyErrCh, logger); err != nil {
 		return err
 	}
 
-	rpt, err := buildChaosReport(context.Background(), eval, cfg, tests, p.Observations(), logger)
+	rpt, err := buildChaosReport(context.Background(), eval, cfg, tests, p.Observations(), durations, logger)
 	if err != nil {
 		return err
 	}
+	rpt.DurationMs = time.Since(runStart).Milliseconds()
 
 	if err := renderer.RenderChaos(rpt); err != nil {
 		return fmt.Errorf("rendering chaos report: %w", err)
@@ -182,6 +202,7 @@ func runChaos(ctx context.Context, cfgPath, outputPath, testFilter string, cloud
 		Passed:       rpt.Passed,
 		Failed:       rpt.Failed,
 		ReportPaths:  reportPathsFor(renderer, cfg.Output, outputPath),
+		AgentLogDir:  runDir,
 	})
 
 	logger.Info().
@@ -353,6 +374,7 @@ func buildChaosReport(
 	cfg *config.ChaosConfig,
 	tests []config.TestConfig,
 	obs map[string]proxy.Observation,
+	durations *durationTracker,
 	logger zerolog.Logger,
 ) (*types.ReliabilityReport, error) {
 	results := make([]types.TestResult, 0, len(tests))
@@ -360,6 +382,7 @@ func buildChaosReport(
 
 	for _, t := range tests {
 		r := evaluateTest(ctx, eval, t, obs[t.ID], cfg.Evaluation.LLMJudgePrompt, logger)
+		r.DurationMs = durations.get(t.ID)
 		if r.Passed {
 			passed++
 		} else {
@@ -712,4 +735,245 @@ func spoolReportForCloud(rpt *types.ReliabilityReport, logger zerolog.Logger) er
 	}
 	ui.Info(fmt.Sprintf("Queued for upload — run `ruptor sync` (file: %s)", path))
 	return nil
+}
+
+// ---------------------------------------------------------------------------
+// agent orchestration
+// ---------------------------------------------------------------------------
+
+const (
+	agentModeOneshot    = "oneshot"
+	agentModePersistent = "persistent"
+	defaultExperimentTO = 60 * time.Second
+	experimentPoll      = 100 * time.Millisecond
+)
+
+// orchestrateExperiments launches the agent-under-test according to
+// cfg.Agent.Mode and drives one experiment per test (oneshot) or a
+// single lifecycle that spans the whole run (persistent). When the
+// agent's Entrypoint is empty the orchestrator returns immediately so
+// an externally-managed agent sees no change in behaviour. On exit it
+// calls stop() to wind the proxy + TUI down, matching the user's
+// expectation that `ruptor run` terminates after its experiments.
+func orchestrateExperiments(
+	ctx context.Context,
+	stop context.CancelFunc,
+	cfg *config.ChaosConfig,
+	tests []config.TestConfig,
+	p *proxy.Proxy,
+	runDir string,
+	durations *durationTracker,
+	logger zerolog.Logger,
+) error {
+	defer stop()
+
+	if cfg.Agent.Entrypoint == "" {
+		logger.Info().Msg("runner: no agent.entrypoint set — assuming external agent")
+		<-ctx.Done()
+		return nil
+	}
+
+	if err := waitProxyReady(ctx, p, 10*time.Second); err != nil {
+		return err
+	}
+
+	timeout := time.Duration(cfg.Evaluation.TimeoutS) * time.Second
+	if timeout <= 0 {
+		timeout = defaultExperimentTO
+	}
+
+	mode := strings.ToLower(strings.TrimSpace(cfg.Agent.Mode))
+	if mode == "" {
+		mode = agentModeOneshot
+	}
+
+	logger.Info().Str("mode", mode).Str("run_dir", runDir).Msg("runner: agent lifecycle starting")
+
+	switch mode {
+	case agentModePersistent:
+		return runPersistent(ctx, cfg, tests, p, runDir, timeout, durations, logger)
+	case agentModeOneshot:
+		return runOneshot(ctx, cfg, tests, p, runDir, timeout, durations, logger)
+	default:
+		return fmt.Errorf("runner: unknown agent.mode %q (want oneshot|persistent)", mode)
+	}
+}
+
+func runPersistent(
+	ctx context.Context,
+	cfg *config.ChaosConfig,
+	tests []config.TestConfig,
+	p *proxy.Proxy,
+	runDir string,
+	timeout time.Duration,
+	durations *durationTracker,
+	logger zerolog.Logger,
+) error {
+	logPath := filepath.Join(runDir, "agent.log")
+	agent, err := runner.Start(ctx, runner.Config{
+		Entrypoint: cfg.Agent.Entrypoint,
+		Env:        cfg.Agent.Env,
+		LogPath:    logPath,
+	})
+	if err != nil {
+		return fmt.Errorf("runner start: %w", err)
+	}
+	logger.Info().Int("pid", agent.PID()).Str("log", logPath).Msg("runner: persistent agent started")
+
+	defer func() { _ = agent.Stop(runner.DefaultStopGrace) }()
+
+	for _, t := range tests {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		start := time.Now()
+		waitForHitsOrTimeout(ctx, p, t.ID, timeout, agent)
+		durations.set(t.ID, time.Since(start).Milliseconds())
+	}
+	return nil
+}
+
+func runOneshot(
+	ctx context.Context,
+	cfg *config.ChaosConfig,
+	tests []config.TestConfig,
+	p *proxy.Proxy,
+	runDir string,
+	timeout time.Duration,
+	durations *durationTracker,
+	logger zerolog.Logger,
+) error {
+	for i, t := range tests {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		logPath := filepath.Join(runDir, fmt.Sprintf("agent-%02d-%s.log", i+1, safeFile(t.ID)))
+		start := time.Now()
+		agent, err := runner.Start(ctx, runner.Config{
+			Entrypoint: cfg.Agent.Entrypoint,
+			Env:        cfg.Agent.Env,
+			LogPath:    logPath,
+		})
+		if err != nil {
+			logger.Warn().Err(err).Str("test", t.ID).Msg("runner: could not start agent")
+			durations.set(t.ID, time.Since(start).Milliseconds())
+			continue
+		}
+		logger.Info().
+			Int("pid", agent.PID()).
+			Str("test", t.ID).
+			Str("log", logPath).
+			Msg("runner: oneshot agent started")
+
+		waitForHitsOrTimeout(ctx, p, t.ID, timeout, agent)
+		_ = agent.Stop(runner.DefaultStopGrace)
+		durations.set(t.ID, time.Since(start).Milliseconds())
+	}
+	return nil
+}
+
+// durationTracker is a mutex-guarded map[testID]ms populated by the
+// orchestrator and consumed by buildChaosReport. A plain map is fine
+// because the orchestrator writes sequentially and the reader runs
+// only after the orchestrator goroutine has returned — the mutex
+// guards the (brief) concurrent window where the TUI is being torn
+// down.
+type durationTracker struct {
+	mu sync.Mutex
+	m  map[string]int64
+}
+
+func newDurationTracker() *durationTracker { return &durationTracker{m: map[string]int64{}} }
+
+func (d *durationTracker) set(id string, ms int64) {
+	d.mu.Lock()
+	d.m[id] = ms
+	d.mu.Unlock()
+}
+
+func (d *durationTracker) get(id string) int64 {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.m[id]
+}
+
+// waitForHitsOrTimeout returns when either:
+//   - proxy observation for testID has Hits > 0 AND the agent has
+//     exited cleanly, OR
+//   - timeout elapses.
+// Never blocks past timeout; the caller-supplied ctx also unblocks us.
+func waitForHitsOrTimeout(ctx context.Context, p *proxy.Proxy, testID string, timeout time.Duration, a *runner.Agent) {
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+	tick := time.NewTicker(experimentPoll)
+	defer tick.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-deadline.C:
+			return
+		case <-tick.C:
+			obs := p.Observations()[testID]
+			if obs.Hits > 0 && a.Exited() {
+				return
+			}
+		}
+	}
+}
+
+// waitProxyReady polls p.Addr() until the listener is bound or the
+// timeout expires. Needed because proxy.Start binds asynchronously in
+// a goroutine and we do not want to race the agent against an
+// unbound port.
+func waitProxyReady(ctx context.Context, p *proxy.Proxy, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for {
+		if addr := p.Addr(); addr != "" {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return errors.New("runner: proxy did not become ready in time")
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
+}
+
+// newRunLogDir returns ~/.ruptor/runs/<UTC-timestamp>/ creating the
+// tree as needed. Agents stream stdout/stderr into files under this
+// directory so they never pollute the TUI.
+func newRunLogDir() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	ts := time.Now().UTC().Format("20060102T150405Z")
+	dir := filepath.Join(home, ".ruptor", "runs", ts)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+	return dir, nil
+}
+
+// safeFile scrubs characters that would make a file name awkward on
+// any common filesystem. Keeps ASCII alphanumerics, '-' and '_'.
+func safeFile(s string) string {
+	out := make([]byte, 0, len(s))
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9', c == '-', c == '_':
+			out = append(out, c)
+		default:
+			out = append(out, '_')
+		}
+	}
+	if len(out) == 0 {
+		return "unnamed"
+	}
+	return string(out)
 }

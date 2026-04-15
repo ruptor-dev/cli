@@ -1,10 +1,12 @@
 package report
 
 import (
+	"embed"
 	"fmt"
 	"html/template"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/rs/zerolog/log"
 	"github.com/ruptor-dev/cli/pkg/types"
@@ -15,39 +17,12 @@ type HTMLRenderer struct {
 	Path string
 }
 
-const fallbackChaosHTML = `<!DOCTYPE html>
-<html><head><title>Ruptor Reliability Report</title>
-<style>body{font-family:sans-serif;margin:2em}table{border-collapse:collapse;width:100%}th,td{border:1px solid #ccc;padding:8px;text-align:left}.pass{color:green}.fail{color:red}</style>
-</head><body>
-<h1>Ruptor Reliability Report</h1>
-<p><strong>Agent:</strong> {{.AgentName}} | <strong>Run:</strong> {{.RunAt.Format "2006-01-02 15:04:05"}} | <strong>Score:</strong> {{printf "%.0f" (pct .Score)}}%</p>
-<p>Tests: {{.TotalTests}} | Passed: {{.Passed}} | Failed: {{.Failed}}</p>
-<table><tr><th>Status</th><th>Test ID</th><th>Fault</th><th>Tool</th><th>Duration</th><th>Judge</th></tr>
-{{range .Results}}<tr>
-<td class="{{if .Passed}}pass{{else}}fail{{end}}">{{if .Passed}}PASS{{else}}FAIL{{end}}</td>
-<td>{{.TestID}}</td><td>{{.FaultType}}</td><td>{{.Tool}}</td><td>{{.DurationMs}}ms</td>
-<td>{{.LLMJudgeVerdict}}{{if .LLMJudgeReason}} &mdash; {{.LLMJudgeReason}}{{end}}</td>
-</tr>{{end}}
-</table></body></html>`
-
-const fallbackSimulateHTML = `<!DOCTYPE html>
-<html><head><title>Ruptor Simulation Report</title>
-<style>body{font-family:sans-serif;margin:2em}table{border-collapse:collapse;width:100%}th,td{border:1px solid #ccc;padding:8px;text-align:left}.reached{color:green}.missed{color:red}</style>
-</head><body>
-<h1>Ruptor Simulation Report</h1>
-<p><strong>Agent:</strong> {{.AgentName}} | <strong>Run:</strong> {{.RunAt.Format "2006-01-02 15:04:05"}} | <strong>Avg Score:</strong> {{printf "%.1f" .AvgScore}}</p>
-<p>Simulations: {{.TotalSims}} | Goal Reached: {{.GoalReached}}</p>
-<table><tr><th>Status</th><th>Simulation</th><th>Persona</th><th>Goal</th><th>Turns</th><th>Score</th><th>Duration</th></tr>
-{{range .Results}}<tr>
-<td class="{{if .GoalReached}}reached{{else}}missed{{end}}">{{if .GoalReached}}REACHED{{else}}MISSED{{end}}</td>
-<td>{{.SimulationID}}</td><td>{{.Persona}}</td><td>{{.Goal}}</td>
-<td>{{.TurnCount}}/{{.MaxTurns}}</td><td>{{.QualityScore}}</td><td>{{.DurationMs}}ms</td>
-</tr>{{end}}
-</table></body></html>`
+//go:embed templates/chaos_report.html.tmpl templates/simulate_report.html.tmpl
+var embeddedTemplates embed.FS
 
 // RenderChaos renders a reliability report as HTML.
 func (h *HTMLRenderer) RenderChaos(report *types.ReliabilityReport) error {
-	tmpl, err := h.loadTemplate("web/chaos_report.html.tmpl", fallbackChaosHTML)
+	tmpl, err := h.loadTemplate("web/chaos_report.html.tmpl", "templates/chaos_report.html.tmpl")
 	if err != nil {
 		return fmt.Errorf("report: rendering html: %w", err)
 	}
@@ -56,7 +31,7 @@ func (h *HTMLRenderer) RenderChaos(report *types.ReliabilityReport) error {
 
 // RenderSimulate renders a conversation report as HTML.
 func (h *HTMLRenderer) RenderSimulate(report *types.ConversationReport) error {
-	tmpl, err := h.loadTemplate("web/simulate_report.html.tmpl", fallbackSimulateHTML)
+	tmpl, err := h.loadTemplate("web/simulate_report.html.tmpl", "templates/simulate_report.html.tmpl")
 	if err != nil {
 		return fmt.Errorf("report: rendering html: %w", err)
 	}
@@ -69,20 +44,101 @@ func (h *HTMLRenderer) RenderSimulate(report *types.ConversationReport) error {
 // and the on-disk template share one source.
 var templateFuncs = template.FuncMap{
 	"pct": func(x float64) float64 { return x * 100 },
+	"scoreClass": func(score float64) string {
+		p := score * 100
+		switch {
+		case p >= 80:
+			return "good"
+		case p >= 60:
+			return "mid"
+		default:
+			return "bad"
+		}
+	},
+	"humanDur": func(ms int64) string {
+		if ms <= 0 {
+			return "—"
+		}
+		if ms < 1000 {
+			return fmt.Sprintf("%dms", ms)
+		}
+		if ms < 60_000 {
+			return fmt.Sprintf("%.1fs", float64(ms)/1000)
+		}
+		m := ms / 60_000
+		s := (ms % 60_000) / 1000
+		return fmt.Sprintf("%dm%02ds", m, s)
+	},
+	"anyJudge": func(results []types.TestResult) bool {
+		for _, r := range results {
+			v := strings.ToUpper(strings.TrimSpace(r.LLMJudgeVerdict))
+			if v != "" && v != "SKIPPED" && v != "SKIP" {
+				return true
+			}
+		}
+		return false
+	},
+	"failureReason": func(r types.TestResult) string {
+		if strings.TrimSpace(r.Error) != "" {
+			return r.Error
+		}
+		if strings.TrimSpace(r.LLMJudgeReason) != "" {
+			return r.LLMJudgeReason
+		}
+		if len(r.DetectedBehaviors) > 0 {
+			parts := make([]string, 0, len(r.DetectedBehaviors))
+			for _, b := range r.DetectedBehaviors {
+				parts = append(parts, humanizeBehavior(b))
+			}
+			return strings.Join(parts, " · ")
+		}
+		return "agent did not handle the injected fault"
+	},
 }
 
-func (h *HTMLRenderer) loadTemplate(path, fallback string) (*template.Template, error) {
+// loadTemplate prefers an on-disk override at `path` (useful for local
+// template hacking during development) and falls back to the embedded
+// copy baked into the binary via go:embed. The embedded version is the
+// production default; users never ship with a web/ directory alongside
+// the binary.
+func (h *HTMLRenderer) loadTemplate(onDiskPath, embeddedPath string) (*template.Template, error) {
 	t := template.New("report").Funcs(templateFuncs)
-	data, err := os.ReadFile(path)
+
+	if data, err := os.ReadFile(onDiskPath); err == nil {
+		return t.Parse(string(data))
+	}
+
+	data, err := embeddedTemplates.ReadFile(embeddedPath)
 	if err != nil {
-		// Template file not found or not readable; use embedded fallback.
-		log.Warn().
-			Str("path", path).
-			Err(err).
-			Msg("report: template file not readable, using fallback")
-		return t.Parse(fallback)
+		log.Error().Err(err).Str("embedded", embeddedPath).Msg("report: embedded template missing")
+		return nil, err
 	}
 	return t.Parse(string(data))
+}
+
+// humanizeBehavior turns the evaluator's machine-readable codes into
+// short reviewer-friendly phrases suitable for the FAIL row reason
+// line in the HTML report. Kept alongside the template funcs so the
+// mapping lives in the one place the report renders from.
+func humanizeBehavior(b types.DetectedBehavior) string {
+	switch b {
+	case types.BehaviorCrash:
+		return "agent errored on the injected response"
+	case types.BehaviorRecoveryFailed:
+		return "no retry or fallback path"
+	case types.BehaviorRecoverySuccess:
+		return "agent recovered"
+	case types.BehaviorInfiniteLoop:
+		return "stuck in a retry loop"
+	case types.BehaviorHallucination:
+		return "hallucinated a result instead of surfacing the failure"
+	case types.BehaviorFallbackUsed:
+		return "used a fallback path"
+	case types.BehaviorTimeout:
+		return "agent timed out before the fault was released"
+	default:
+		return string(b)
+	}
 }
 
 func (h *HTMLRenderer) writeHTML(filename string, tmpl *template.Template, data any) error {

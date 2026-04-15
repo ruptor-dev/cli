@@ -2,6 +2,7 @@ version: "1"
 
 agent:
   name: ollama_conversation_agent
+  mode: persistent
   base_url: http://localhost:3000
   endpoint: /chat
   request_timeout_s: 60

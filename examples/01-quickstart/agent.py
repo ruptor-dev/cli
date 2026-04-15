@@ -14,7 +14,7 @@ TOOL_BASE_URL = os.environ.get("TOOL_BASE_URL", "http://localhost:9090")
 
 def run(query: str) -> None:
     try:
-        resp = requests.get(f"{TOOL_BASE_URL}/search", params={"q": query}, timeout=35)
+        resp = requests.get(f"{TOOL_BASE_URL}/search", params={"q": query}, timeout=5)
     except requests.Timeout:
         print(f"agent: tool call timed out against {TOOL_BASE_URL}")
         return

@@ -20,8 +20,9 @@ type ReliabilityReport struct {
 	// (1.0 = every test passed). Renderers multiply by 100 to show
 	// "67%". Persisted in this form so platform-side analytics never
 	// have to guess between "67" (percent) and "0.67" (fraction).
-	Score   float64      `json:"score"`
-	Results []TestResult `json:"results"`
+	Score       float64      `json:"score"`
+	DurationMs  int64        `json:"duration_ms"`
+	Results     []TestResult `json:"results"`
 }
 
 type ConversationReport struct {

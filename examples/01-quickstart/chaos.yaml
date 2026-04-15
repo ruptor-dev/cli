@@ -9,13 +9,13 @@ agent:
 proxy:
   port: 8080
   passthrough_url: http://localhost:9090
-  request_timeout_s: 15
+  request_timeout_s: 5
 
 tests:
   - id: search_timeout
     tool: /search
     fault: tool_timeout
-    delay_ms: 5000
+    delay_ms: 3000
     probability: 1.0
 
   - id: search_invalid_json
@@ -36,7 +36,7 @@ tests:
 
 evaluation:
   max_iterations: 5
-  timeout_s: 30
+  timeout_s: 5
   llm_judge: false
 
 output:

@@ -14,6 +14,11 @@ type CompletionSummary struct {
 	Failed       int
 	Errored      int
 	ReportPaths  []string
+	// AgentLogDir is the directory holding per-experiment agent
+	// stdout/stderr logs. Rendered at the bottom of the completion
+	// screen so users can find the forensics artefacts after a run.
+	// Empty when no runner was used.
+	AgentLogDir string
 }
 
 // RenderCompletion builds the boxed completion screen from SKILL-ui.md.
@@ -48,6 +53,9 @@ func RenderCompletion(s CompletionSummary) string {
 	b.WriteString("\n\n")
 	for _, p := range s.ReportPaths {
 		b.WriteString("  " + styleSuccess.Render("✓ Report saved  →  ") + styleInfo.Render(p) + "\n")
+	}
+	if s.AgentLogDir != "" {
+		b.WriteString("  " + styleInfo.Render("• Agent logs    →  ") + styleInfo.Render(s.AgentLogDir) + "\n")
 	}
 	return b.String()
 }

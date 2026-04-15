@@ -41,6 +41,8 @@ const (
 type SimAgentConfig struct {
 	Name            string    `yaml:"name"`
 	Entrypoint      string    `yaml:"entrypoint"`
+	Mode            string    `yaml:"mode"`
+	Env             map[string]string `yaml:"env"`
 	BaseURL         string    `yaml:"base_url"`
 	Endpoint        string    `yaml:"endpoint"`
 	Protocol        string    `yaml:"protocol"`

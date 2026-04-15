@@ -3,6 +3,7 @@ version: "1"
 agent:
   name: ollama_agent
   entrypoint: python agent.py
+  mode: persistent
   env:
     TOOL_BASE_URL: http://localhost:8080
     OLLAMA_MODEL: qwen2

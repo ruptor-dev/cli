@@ -20,6 +20,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -196,6 +198,61 @@ func TestDoctorExitsZeroWhenCloudDisabled(t *testing.T) {
 	assert.Contains(t, out, "Cloud reachability")
 	assert.Contains(t, out, "Authentication")
 	assert.Contains(t, out, "coming soon")
+}
+
+func TestRunLaunchesAgentEntrypoint(t *testing.T) {
+	// Sanity-check the whole runner wiring end-to-end: `ruptor run`
+	// must actually exec the entrypoint declared in chaos.yaml and
+	// wait for it. The agent here is a tiny shell snippet that writes
+	// its PID into a sentinel file; the test asserts the file exists
+	// and contains a live PID after the run finishes. The run itself
+	// completes because timeout_s bounds the experiment.
+	dir := t.TempDir()
+	sentinel := filepath.Join(dir, "agent.pid")
+	cfgPath := filepath.Join(dir, "chaos.yaml")
+
+	// The port is reserved via net.Listen(:0) + Close — cheap way to
+	// pick a free port without races in the common case.
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	port := l.Addr().(*net.TCPAddr).Port
+	require.NoError(t, l.Close())
+
+	cfg := fmt.Sprintf(`version: "1"
+agent:
+  name: runner_integration_agent
+  entrypoint: sh -c "echo $$ > %s; sleep 10"
+  mode: oneshot
+proxy:
+  port: %d
+  passthrough_url: http://127.0.0.1:1
+  request_timeout_s: 5
+tests:
+  - id: noop
+    tool: /noop
+    fault: tool_timeout
+    delay_ms: 10
+    probability: 1.0
+evaluation:
+  max_iterations: 1
+  timeout_s: 2
+  llm_judge: false
+output:
+  format: stdout
+`, sentinel, port)
+	require.NoError(t, os.WriteFile(cfgPath, []byte(cfg), 0o600))
+
+	_, code := runRuptor(t, "run", cfgPath)
+	assert.Equal(t, 0, code)
+
+	body, err := os.ReadFile(sentinel)
+	require.NoError(t, err, "sentinel file must exist — agent entrypoint never ran")
+	pid, err := strconv.Atoi(strings.TrimSpace(string(body)))
+	require.NoError(t, err, "sentinel must contain a numeric PID, got %q", body)
+	assert.Greater(t, pid, 1, "PID must be > 1")
+	proc, err := os.FindProcess(pid)
+	require.NoError(t, err)
+	assert.NotNil(t, proc)
 }
 
 // repoPath resolves a path relative to the cli/ repo root regardless

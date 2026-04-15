@@ -56,22 +56,30 @@ pip install --quiet -r requirements.txt
 cp ../01-quickstart/mock_tool_server.py ./_mock_tool_server.py
 python _mock_tool_server.py >/tmp/ruptor-02-mock.log 2>&1 &
 MOCK_PID=$!
+trap 'kill "$MOCK_PID" 2>/dev/null || true; rm -f ./_mock_tool_server.py' EXIT
 
+export TOOL_BASE_URL="http://localhost:8080"
+
+# Chaos: ruptor's own runner launches agent.py (mode: persistent) and
+# stops it at the end — no manual &-launch here, the runner owns the
+# lifecycle.
+echo "▸ $RUPTOR run chaos.yaml"
+"$RUPTOR" run chaos.yaml
+
+# Simulate: ruptor does not yet launch the entrypoint for simulate
+# mode, so we spin up agent.py manually for this phase and take it
+# down on exit.
 python agent.py >/tmp/ruptor-02-agent.log 2>&1 &
 AGENT_PID=$!
 trap 'kill "$MOCK_PID" "$AGENT_PID" 2>/dev/null || true; rm -f ./_mock_tool_server.py' EXIT
 
 for _ in {1..40}; do
-  if curl -sf http://localhost:3000/chat -X POST -H 'content-type: application/json' -d '{"message":"ping"}' >/dev/null 2>&1; then
+  if curl -sf http://localhost:3000/chat -X POST -H 'content-type: application/json' \
+       -d '{"message":"ping","session_id":"warmup"}' >/dev/null 2>&1; then
     break
   fi
   sleep 0.5
 done
-
-export TOOL_BASE_URL="http://localhost:8080"
-
-echo "▸ $RUPTOR run chaos.yaml"
-"$RUPTOR" run chaos.yaml
 
 echo
 echo "▸ $RUPTOR simulate simulate.yaml"

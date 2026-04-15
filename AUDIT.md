@@ -235,22 +235,35 @@ The stack-swap PR (see §11) closed §8 item 9. Remaining items deserve isolated
   exercised the enabled-path behaviour now skip on the flag; a new
   `TestRun_CloudDisabled_ShowsComingSoon` pins the disabled-path
   behaviour. Policy documented in CLAUDE.md §Feature flag.
+- **Agent runner (2026-04-14).** `ruptor run` now launches the agent
+  declared in `agent.entrypoint`. New `internal/runner` package with
+  `Agent.Start/Wait/Stop`, `SysProcAttr.Setpgid=true` for group
+  signalling, stdout+stderr piped to
+  `~/.ruptor/runs/<UTC-ts>/agent.log`. `AgentConfig.Mode` selects
+  `oneshot` (launch per experiment, default) vs `persistent` (single
+  lifecycle spanning the full run). Empty `entrypoint` keeps the
+  previous external-agent behaviour. Completion per experiment is
+  `Hits > 0 AND agent exited` OR `evaluation.timeout_s`, whichever
+  first. Integration test `TestRunLaunchesAgentEntrypoint` asserts
+  the child process actually spawns and writes a sentinel PID file.
 
 ### Open bugs
 
-- **Proxy hangs on agent disconnect (2026-04-14).** When an experiment
-  uses `tool_timeout` and the agent-side client gives up (closes its
-  HTTP connection or hits its own timeout), the proxy does not detect
-  the client-side close and the experiment never transitions out of
-  the in-flight state. `ruptor run` ends up hanging indefinitely
-  waiting for the observation that will never land. Surfaces in
-  `examples/01-quickstart` whenever the agent request timeout is
-  shorter than `delay_ms`. Short-term mitigation: keep the agent
-  request timeout longer than the fault's `delay_ms`. Proper fix:
-  have the proxy watch `r.Context().Done()` (or equivalent) during a
-  `tool_timeout` hold and mark the observation as `client_closed` the
-  moment it fires, releasing the experiment. Requires a new
-  `Observation.ClientClosed` signal and corresponding UI status.
+- **`tool_timeout` client-close detection (2026-04-14).** The proxy
+  does not observe the agent-side HTTP connection closing during a
+  `tool_timeout` hold. Observations stay in-flight and the experiment
+  never transitions on that signal alone. With the runner now
+  bounding each experiment with `evaluation.timeout_s` this no longer
+  hangs `ruptor run` indefinitely, but it still means the report
+  cannot distinguish "agent gave up early" from "timeout fired". Fix:
+  watch `r.Context().Done()` during the hold and set
+  `Observation.ClientClosed = true` on early return; surface a new
+  `client_closed` UI status.
+- **TUI real-time updates (2026-04-14).** `runChaosTUI` snapshots
+  observations on a 100ms tick. Agent activity during a long
+  experiment appears stepwise rather than continuously. The planned
+  push-channel from proxy → UI (mentioned under §10) remains the
+  proper fix.
 
 ### Known non-blocking issues
 
