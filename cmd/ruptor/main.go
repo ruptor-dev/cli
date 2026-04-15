@@ -897,11 +897,16 @@ func (d *durationTracker) get(id string) int64 {
 	return d.m[id]
 }
 
-// waitForHitsOrTimeout returns when either:
-//   - proxy observation for testID has Hits > 0 AND the agent has
-//     exited cleanly, OR
-//   - timeout elapses.
-// Never blocks past timeout; the caller-supplied ctx also unblocks us.
+// waitForHitsOrTimeout returns as soon as any completion signal fires:
+//   - the agent process exited (oneshot mode hits this every time),
+//   - the proxy recorded at least one hit for this test (persistent
+//     mode, where the agent never exits between experiments), or
+//   - the supplied timeout elapses (safety net).
+//
+// Requiring BOTH agent-exit AND hits would incorrectly block on tests
+// where the proxy's first-match dispatch assigns the observation to a
+// different testID sharing the same tool. Agent exit alone is enough
+// to know the experiment produced whatever it was going to produce.
 func waitForHitsOrTimeout(ctx context.Context, p *proxy.Proxy, testID string, timeout time.Duration, a *runner.Agent) {
 	deadline := time.NewTimer(timeout)
 	defer deadline.Stop()
@@ -914,8 +919,10 @@ func waitForHitsOrTimeout(ctx context.Context, p *proxy.Proxy, testID string, ti
 		case <-deadline.C:
 			return
 		case <-tick.C:
-			obs := p.Observations()[testID]
-			if obs.Hits > 0 && a.Exited() {
+			if a.Exited() {
+				return
+			}
+			if p.Observations()[testID].Hits > 0 {
 				return
 			}
 		}

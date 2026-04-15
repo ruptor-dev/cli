@@ -259,6 +259,16 @@ The stack-swap PR (see §11) closed §8 item 9. Remaining items deserve isolated
   watch `r.Context().Done()` during the hold and set
   `Observation.ClientClosed = true` on early return; surface a new
   `client_closed` UI status.
+- **Evaluator over-tagging on llm_error (2026-04-15).** Single-call
+  agents are falsely flagged as `infinite_loop + crash` when handling
+  an injected `llm_error`. Root cause: the heuristic triggers on zero
+  retries instead of requiring ≥2 calls to the same endpoint within
+  one experiment lifetime. Fix: gate the `infinite_loop` flag on
+  `observed_calls >= 2`. Surfaces in `examples/05-all-faults` as a
+  single FAIL row labelled "stuck in a retry loop" even though the
+  agent makes exactly one POST and exits. Until fixed, the reported
+  Robustness Score for well-behaved single-call agents under
+  `llm_error` is 1/N too low.
 - **TUI real-time updates (2026-04-14).** `runChaosTUI` snapshots
   observations on a 100ms tick. Agent activity during a long
   experiment appears stepwise rather than continuously. The planned

@@ -1,0 +1,68 @@
+version: "1"
+
+agent:
+  name: all_faults_agent
+  entrypoint: python agent.py
+  mode: oneshot
+  env:
+    TOOL_BASE_URL: http://localhost:8080
+
+proxy:
+  port: 8080
+  passthrough_url: http://localhost:9191
+  request_timeout_s: 10
+
+tests:
+  - id: test_tool_timeout
+    tool: /search
+    fault: tool_timeout
+    delay_ms: 3000
+    probability: 1.0
+
+  - id: test_slow_response
+    tool: /search
+    fault: slow_response
+    delay_ms: 2000
+    probability: 1.0
+
+  - id: test_tool_error
+    tool: /search
+    fault: tool_error
+    status_code: 503
+    probability: 1.0
+
+  - id: test_invalid_json
+    tool: /search
+    fault: invalid_json
+    probability: 1.0
+
+  - id: test_empty_response
+    tool: /search
+    fault: empty_response
+    probability: 1.0
+
+  - id: test_rate_limit
+    tool: /search
+    fault: rate_limit
+    retry_after_s: 2
+    probability: 1.0
+
+  - id: test_llm_error
+    tool: /llm/complete
+    fault: llm_error
+    probability: 1.0
+
+  - id: test_llm_timeout
+    tool: /llm/complete
+    fault: llm_timeout
+    delay_ms: 3000
+    probability: 1.0
+
+evaluation:
+  max_iterations: 5
+  timeout_s: 10
+  llm_judge: false
+
+output:
+  format: both
+  path: ./reports/
