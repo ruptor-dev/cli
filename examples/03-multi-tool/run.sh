@@ -14,7 +14,17 @@ need() {
 }
 
 need python3
-need ruptor
+
+if ! command -v "${RUPTOR_BIN:-ruptor}" &>/dev/null; then
+  if [ -z "${RUPTOR_BIN:-}" ]; then
+    echo "✗ ruptor not found. Install: brew install ruptor-dev/tap/ruptor"
+  else
+    echo "✗ ruptor binary not found at $RUPTOR_BIN"
+  fi
+  exit 1
+fi
+
+RUPTOR="${RUPTOR_BIN:-ruptor}"
 
 if [ ! -d .venv ]; then
   python3 -m venv .venv
@@ -37,5 +47,5 @@ done
 
 export TOOL_BASE_URL="http://localhost:8080"
 
-echo "▸ ruptor run chaos.yaml"
-ruptor run chaos.yaml
+echo "▸ $RUPTOR run chaos.yaml"
+"$RUPTOR" run chaos.yaml

@@ -56,8 +56,9 @@ Report: ./reports/chaos_report.html
   ruptor is designed to surface.
 - **`search_empty`**: a 200 OK with zero bytes is frequently untested —
   watch whether your own agent treats it as "no results" or explodes.
-- **`search_timeout`**: the toy agent has a `timeout=5` hard-coded, so
-  the injected 30s delay is caught. Remove that timeout and the test
-  fails instead.
+- **`search_timeout`**: the toy agent has a `timeout=35` hard-coded,
+  longer than the injected 5s delay, so it waits through the hold and
+  records the behavior. Drop the agent timeout below 5s and the agent
+  gives up before the fault releases — the report flags that pattern.
 - **`search_rate_limit`**: 429 with `Retry-After`; production agents
   should back off, not retry immediately.

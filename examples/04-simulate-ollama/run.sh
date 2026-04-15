@@ -19,8 +19,18 @@ need() {
 }
 
 need python3
-need ruptor
 need curl
+
+if ! command -v "${RUPTOR_BIN:-ruptor}" &>/dev/null; then
+  if [ -z "${RUPTOR_BIN:-}" ]; then
+    echo "✗ ruptor not found. Install: brew install ruptor-dev/tap/ruptor"
+  else
+    echo "✗ ruptor binary not found at $RUPTOR_BIN"
+  fi
+  exit 1
+fi
+
+RUPTOR="${RUPTOR_BIN:-ruptor}"
 
 if ! curl -sf "$OLLAMA_URL/api/tags" >/dev/null; then
   echo "error: Ollama not reachable at $OLLAMA_URL. Run: ollama serve" >&2
@@ -51,5 +61,5 @@ for _ in {1..40}; do
   sleep 0.5
 done
 
-echo "▸ ruptor simulate simulate.yaml"
-ruptor simulate simulate.yaml
+echo "▸ $RUPTOR simulate simulate.yaml"
+"$RUPTOR" simulate simulate.yaml
