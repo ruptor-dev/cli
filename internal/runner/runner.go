@@ -27,7 +27,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/google/shlex"
@@ -104,7 +103,7 @@ func Start(ctx context.Context, cfg Config) (*Agent, error) {
 	cmd.Env = mergeEnv(os.Environ(), cfg.Env)
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	setProcessGroup(cmd)
 
 	if err := cmd.Start(); err != nil {
 		_ = logFile.Close()
@@ -142,11 +141,11 @@ func (a *Agent) Wait(ctx context.Context, timeout time.Duration) error {
 	case <-a.waitCh:
 		return a.waitErr
 	case <-timerC:
-		a.killGroup(syscall.SIGKILL)
+		a.kill()
 		<-a.waitCh
 		return ErrWaitTimeout
 	case <-ctx.Done():
-		a.killGroup(syscall.SIGKILL)
+		a.kill()
 		<-a.waitCh
 		return ctx.Err()
 	}
@@ -166,7 +165,7 @@ func (a *Agent) Stop(grace time.Duration) error {
 		grace = DefaultStopGrace
 	}
 
-	a.killGroup(syscall.SIGTERM)
+	a.terminate()
 
 	t := time.NewTimer(grace)
 	defer t.Stop()
@@ -175,7 +174,7 @@ func (a *Agent) Stop(grace time.Duration) error {
 	case <-a.waitCh:
 		return nil
 	case <-t.C:
-		a.killGroup(syscall.SIGKILL)
+		a.kill()
 		<-a.waitCh
 		return nil
 	}
@@ -210,14 +209,21 @@ func (a *Agent) PID() int {
 	return a.cmd.Process.Pid
 }
 
-// killGroup sends sig to the child's process group (pgid == pid because
-// of Setpgid=true). Best-effort: errors are swallowed because the
+// terminate and kill dispatch to platform-specific implementations in
+// runner_unix.go / runner_windows.go. Errors are swallowed because the
 // common case is "process already gone".
-func (a *Agent) killGroup(sig syscall.Signal) {
+func (a *Agent) terminate() {
 	if a.cmd == nil || a.cmd.Process == nil {
 		return
 	}
-	_ = syscall.Kill(-a.cmd.Process.Pid, sig)
+	_ = terminateGroup(a.cmd)
+}
+
+func (a *Agent) kill() {
+	if a.cmd == nil || a.cmd.Process == nil {
+		return
+	}
+	_ = killProcessGroup(a.cmd)
 }
 
 // mergeEnv overlays overrides on top of the inherited environment. A
