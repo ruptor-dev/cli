@@ -24,6 +24,21 @@ go install github.com/ruptor-dev/cli/cmd/ruptor@latest
 
 > Requires Go 1.22+
 
+### macOS — First Run
+
+On macOS, Gatekeeper may block the binary on first run with
+"Apple could not verify ruptor is free of malware."
+
+This is expected for unsigned OSS binaries. Remove the quarantine
+attribute and run normally:
+
+```bash
+xattr -d com.apple.quarantine $(which ruptor)
+ruptor --version
+```
+
+This is a one-time step. It does not affect subsequent runs.
+
 ---
 
 ## Quickstart — Chaos Testing
