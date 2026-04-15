@@ -32,7 +32,7 @@ import (
 // -X main.buildDate=…". Dev builds keep the placeholder values so
 // `ruptor --version` is never silently empty.
 var (
-	version   = "0.0.0-dev"
+	version   = "dev"
 	commit    = "none"
 	buildDate = "unknown"
 )
@@ -53,14 +53,16 @@ func newRootCmd() *cobra.Command {
 	var logLevel string
 
 	cmd := &cobra.Command{
-		Use:   "ruptor",
-		Short: "Ruptor - chaos testing and simulation for AI agents",
+		Use:     "ruptor",
+		Short:   "Ruptor - chaos testing and simulation for AI agents",
+		Version: version,
 		PersistentPreRun: func(cmd *cobra.Command, args []string) {
 			rootLogger = ui.NewLogger(ui.LogLevel(logLevel))
 		},
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
+	cmd.SetVersionTemplate("ruptor version {{.Version}}\n")
 
 	cmd.PersistentFlags().StringVar(&logLevel, "log-level", "info", "log level: debug, info, warn, error")
 
@@ -647,7 +649,7 @@ func newVersionCmd() *cobra.Command {
 		Use:   "version",
 		Short: "Print Ruptor version",
 		Run: func(cmd *cobra.Command, args []string) {
-			ui.Printf("ruptor %s\n", version)
+			ui.Printf("ruptor version %s\n", version)
 			ui.Printf("  commit:     %s\n", commit)
 			ui.Printf("  built:      %s\n", buildDate)
 		},
