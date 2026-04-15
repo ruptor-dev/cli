@@ -225,6 +225,17 @@ The stack-swap PR (see §11) closed §8 item 9. Remaining items deserve isolated
   - Unit tests for `parseChaosResponse` and `parseConversationResponse` in `internal/evaluator/llmjudge`. The `OpenAIJudge` struct is at 0% coverage because the parsers run only inside API calls; extract them or test them directly.
   - Integration test that spawns the `ruptor` binary against an `httptest.Server` backend. Covers `cmd/ruptor` (currently 0%) end-to-end.
 
+### Resolved follow-ups
+
+- **Doctor cloud-gating (2026-04-14).** `internal/doctor/doctor.go` now
+  short-circuits `checkNetwork` and `checkAuth` to `StatusWarn` with
+  message `coming soon` when `cloud.CloudReportingEnabled = false`.
+  `ruptor doctor` on a fresh install prints ⚠ rows for Cloud
+  reachability + Authentication and still exits 0. Old tests that
+  exercised the enabled-path behaviour now skip on the flag; a new
+  `TestRun_CloudDisabled_ShowsComingSoon` pins the disabled-path
+  behaviour. Policy documented in CLAUDE.md §Feature flag.
+
 ### Known non-blocking issues
 
 - **`docs/superpowers/specs/SKILL-proxy.md` is out of sync with the code.** The doc describes an aspirational `FaultHandler { Name(), CanHandle(), Inject(ctx, req, next) }` chain-of-responsibility contract with `ProxyRequest` / `HandlerFunc` types that do not exist in `pkg/types/` or `internal/proxy/`. The six shipped faults (plus `llm_error`, `llm_timeout`) all implement the simpler `types.Fault { Type(), Inject(w, r) error }` interface behind a `FaultRegistry` + factory. Each new fault follows that pattern for consistency. Either refactor all nine faults to match the doc, or rewrite the doc to match the code — do not accept a review note asking to follow the doc verbatim until that reconciliation happens.

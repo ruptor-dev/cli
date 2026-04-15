@@ -32,7 +32,7 @@ import (
 // -X main.buildDate=…". Dev builds keep the placeholder values so
 // `ruptor --version` is never silently empty.
 var (
-	version   = "dev"
+	version   = "0.0.0-dev"
 	commit    = "none"
 	buildDate = "unknown"
 )

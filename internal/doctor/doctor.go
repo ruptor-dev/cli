@@ -257,6 +257,11 @@ func isAddrInUse(err error) bool {
 // hard failure because that says nothing about the user's machine.
 func checkNetwork(ctx context.Context, hc *http.Client, cloudURL string) Result {
 	r := Result{Name: "Cloud reachability"}
+	if !cloud.CloudReportingEnabled {
+		r.Status = StatusWarn
+		r.Message = "coming soon"
+		return r
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, cloudURL, nil)
 	if err != nil {
 		r.Status = StatusFail
@@ -289,6 +294,11 @@ func checkNetwork(ctx context.Context, hc *http.Client, cloudURL string) Result 
 // The full token is never printed — only MaskedSuffix.
 func checkAuth(configDir string) Result {
 	r := Result{Name: "Authentication"}
+	if !cloud.CloudReportingEnabled {
+		r.Status = StatusWarn
+		r.Message = "coming soon"
+		return r
+	}
 	path := filepath.Join(configDir, "config.yaml")
 	store, err := auth.LoadFrom(path)
 	if errors.Is(err, auth.ErrNotAuthenticated) {

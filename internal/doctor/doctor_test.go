@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"testing"
 
+	"github.com/ruptor-dev/cli/internal/cloud"
 	"github.com/ruptor-dev/cli/internal/doctor"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -29,6 +30,9 @@ func findResult(t *testing.T, results []doctor.Result, name string) doctor.Resul
 }
 
 func TestRun_AllOK(t *testing.T) {
+	if !cloud.CloudReportingEnabled {
+		t.Skip("cloud checks short-circuit to Warn while CloudReportingEnabled=false")
+	}
 	dir := t.TempDir()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -106,6 +110,9 @@ func TestRun_PortInUse(t *testing.T) {
 }
 
 func TestRun_NetworkUnreachable(t *testing.T) {
+	if !cloud.CloudReportingEnabled {
+		t.Skip("cloud checks short-circuit to Warn while CloudReportingEnabled=false")
+	}
 	// Already-cancelled context guarantees the network probe returns
 	// immediately rather than waiting for a real TCP timeout against
 	// the unreachable URL.
@@ -121,6 +128,9 @@ func TestRun_NetworkUnreachable(t *testing.T) {
 }
 
 func TestRun_NetworkServer5xx(t *testing.T) {
+	if !cloud.CloudReportingEnabled {
+		t.Skip("cloud checks short-circuit to Warn while CloudReportingEnabled=false")
+	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
@@ -134,7 +144,28 @@ func TestRun_NetworkServer5xx(t *testing.T) {
 	assert.Equal(t, doctor.StatusWarn, r.Status)
 }
 
+func TestRun_CloudDisabled_ShowsComingSoon(t *testing.T) {
+	if cloud.CloudReportingEnabled {
+		t.Skip("only meaningful while CloudReportingEnabled=false")
+	}
+	results := doctor.Run(context.Background(), doctor.Options{
+		GoVersion: "go1.99.0",
+	})
+	net := findResult(t, results, "Cloud reachability")
+	assert.Equal(t, doctor.StatusWarn, net.Status)
+	assert.Equal(t, "coming soon", net.Message)
+
+	a := findResult(t, results, "Authentication")
+	assert.Equal(t, doctor.StatusWarn, a.Status)
+	assert.Equal(t, "coming soon", a.Message)
+
+	assert.False(t, doctor.HasFailures(results))
+}
+
 func TestRun_AuthMalformedToken(t *testing.T) {
+	if !cloud.CloudReportingEnabled {
+		t.Skip("auth check short-circuits to Warn while CloudReportingEnabled=false")
+	}
 	if runtime.GOOS == "windows" {
 		t.Skip("posix permission bits not enforced on windows")
 	}

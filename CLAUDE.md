@@ -197,6 +197,25 @@ When user passes --cloud and CloudReportingEnabled is false:
 Show: "☁ Cloud reporting is coming soon. Join the waitlist at https://ruptor.dev"
 Do NOT fail the run. Continue normally with local report.
 
+### Cloud-dependent checks (doctor, auth, sync)
+
+When `CloudReportingEnabled = false`, every cloud-dependent check must
+render as ⚠ warning with message `coming soon`, never as ✗ error, and
+must not affect the exit code. This applies to:
+
+- `ruptor doctor` — Cloud reachability, Authentication rows
+- `ruptor auth login` / `auth status` — short-circuit to the waitlist
+  message rather than hitting the device-code endpoints
+- `ruptor sync` — no-op, print the same waitlist line
+- any future command that calls the platform API
+
+The rule is: a user on a fresh install must see a clean `ruptor doctor`
+(exit 0) even though the platform is not live yet. Exit code 1 is
+reserved for real local-environment failures.
+
+When `CloudReportingEnabled = true` the checks perform their real work
+and can fail the doctor run the usual way.
+
 ## Retry with jitter (cenkalti/backoff v4)
 
 Used in: reporting client, LLM judge calls, auth token refresh.
