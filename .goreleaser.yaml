@@ -69,16 +69,13 @@ checksum:
 # boils down to: cosign verify-blob --certificate=<...> --signature=<...>
 # <checksum-file>, then sha256sum -c.
 signs:
-  - id: cosign-checksums
+  - id: cosign
     cmd: cosign
-    signature: "${artifact}.sig"
-    certificate: "${artifact}.pem"
     args:
       - sign-blob
-      - --yes
-      - --output-signature=${signature}
-      - --output-certificate=${certificate}
+      - --bundle=${signature}
       - ${artifact}
+      - --yes
     artifacts: checksum
     output: true
 
