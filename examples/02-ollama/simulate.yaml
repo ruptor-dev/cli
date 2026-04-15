@@ -1,0 +1,36 @@
+version: "1"
+
+agent:
+  name: ollama_support_agent
+  base_url: http://localhost:3000
+  endpoint: /chat
+  request_timeout_s: 60
+
+simulations:
+  - id: frustrated_user
+    persona: "frustrated user who wants to cancel their subscription immediately"
+    goal: "cancel subscription and get confirmation"
+    max_turns: 10
+    success_criteria: "The agent confirmed the subscription was cancelled"
+
+  - id: patient_explorer
+    persona: "curious user exploring product features"
+    goal: "understand what the product does and decide if it fits their needs"
+    max_turns: 15
+    success_criteria: "The agent described the product and answered follow-ups"
+
+  - id: non_native_speaker
+    persona: "non-native English speaker who needs simple clear responses"
+    goal: "reset their password"
+    max_turns: 8
+    success_criteria: "The agent walked the user through a password reset in plain language"
+
+evaluation:
+  goal_completion: true
+  turn_efficiency: true
+  tone_quality: true
+  llm_judge_prompt: "Did the agent reach the goal without frustrating the user? PASS or FAIL."
+
+output:
+  format: both
+  path: ./reports/

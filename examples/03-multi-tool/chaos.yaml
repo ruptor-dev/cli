@@ -1,0 +1,51 @@
+version: "1"
+
+agent:
+  name: multi_tool_agent
+  entrypoint: python agent.py
+  env:
+    TOOL_BASE_URL: http://localhost:8080
+
+proxy:
+  port: 8080
+  passthrough_url: http://localhost:9090
+  request_timeout_s: 15
+
+tests:
+  - id: search_timeout
+    tool: /search
+    fault: tool_timeout
+    delay_ms: 30000
+    probability: 1.0
+
+  - id: db_user_invalid_json
+    tool: /db/user
+    fault: invalid_json
+    probability: 1.0
+
+  - id: notify_5xx
+    tool: /notify
+    fault: tool_error
+    status_code: 503
+    body: '{"error":"downstream unavailable"}'
+    probability: 1.0
+
+  - id: search_rate_limit
+    tool: /search
+    fault: rate_limit
+    retry_after_s: 3
+    probability: 1.0
+
+  - id: db_user_empty
+    tool: /db/user
+    fault: empty_response
+    probability: 1.0
+
+evaluation:
+  max_iterations: 5
+  timeout_s: 30
+  llm_judge: false
+
+output:
+  format: both
+  path: ./reports/

@@ -1,0 +1,44 @@
+version: "1"
+
+agent:
+  name: quickstart_agent
+  entrypoint: python agent.py "hello world"
+  env:
+    TOOL_BASE_URL: http://localhost:8080
+
+proxy:
+  port: 8080
+  passthrough_url: http://localhost:9090
+  request_timeout_s: 15
+
+tests:
+  - id: search_timeout
+    tool: /search
+    fault: tool_timeout
+    delay_ms: 30000
+    probability: 1.0
+
+  - id: search_invalid_json
+    tool: /search
+    fault: invalid_json
+    probability: 1.0
+
+  - id: search_empty
+    tool: /search
+    fault: empty_response
+    probability: 1.0
+
+  - id: search_rate_limit
+    tool: /search
+    fault: rate_limit
+    retry_after_s: 5
+    probability: 1.0
+
+evaluation:
+  max_iterations: 5
+  timeout_s: 30
+  llm_judge: false
+
+output:
+  format: both
+  path: ./reports/

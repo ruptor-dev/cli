@@ -1,0 +1,38 @@
+version: "1"
+
+agent:
+  name: ollama_conversation_agent
+  base_url: http://localhost:3000
+  endpoint: /chat
+  request_timeout_s: 60
+
+simulations:
+  - id: frustrated_user
+    persona: "frustrated user who wants to cancel their subscription immediately"
+    goal: "cancel subscription and get confirmation"
+    max_turns: 10
+    success_criteria: "The agent acknowledged frustration and confirmed cancellation"
+
+  - id: patient_explorer
+    persona: "curious user exploring product features at a relaxed pace"
+    goal: "understand what the product does and decide whether to try it"
+    max_turns: 10
+    success_criteria: "The agent explained the product and handled follow-ups"
+
+  - id: non_native_speaker
+    persona: "non-native English speaker who needs plain, simple responses"
+    goal: "reset their password"
+    max_turns: 10
+    success_criteria: "The agent guided the user through a password reset using simple language"
+
+evaluation:
+  goal_completion: true
+  turn_efficiency: true
+  tone_quality: true
+  goal_completion_threshold: 0.8
+  tone_quality_threshold: 0.7
+  llm_judge_prompt: "Score the conversation 0.0-1.0 on goal completion and tone. PASS only if goal >= 0.8 and tone >= 0.7."
+
+output:
+  format: both
+  path: ./reports/
