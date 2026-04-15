@@ -43,10 +43,5 @@ jobs:
           version: latest
           args: release --clean
         env:
-          # For the homebrew-tap commit, swap GITHUB_TOKEN for a
-          # fine-grained PAT with `contents: write` on
-          # ruptor-dev/homebrew-tap — store it as HOMEBREW_TAP_TOKEN in
-          # repo secrets and uncomment the env below when that secret
-          # exists.
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
