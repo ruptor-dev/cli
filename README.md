@@ -18,6 +18,20 @@ tool timeouts, invalid JSON, rate limits, empty responses. Before your users do.
 
 ## Installation
 
+### Homebrew (recommended, macOS/Linux)
+
+```bash
+brew install ruptor-dev/tap/ruptor
+```
+
+### curl
+
+```bash
+curl -fsSL https://ruptor.dev/install.sh | sh
+```
+
+### go install
+
 ```bash
 go install github.com/ruptor-dev/cli/cmd/ruptor@latest
 ```
@@ -133,6 +147,8 @@ ruptor simulate simulate.yaml --sim frustrated_user
 | `invalid_json` | Returns malformed JSON — does the agent handle ParseError? |
 | `empty_response` | Returns 200 OK with empty body — common and rarely tested |
 | `rate_limit` | Returns 429 — does the agent implement backoff or spam? |
+| `llm_error` | LLM backend returns 503 — does the agent have a fallback? |
+| `llm_timeout` | LLM call hangs indefinitely — does the agent have a deadline? |
 
 ---
 
@@ -140,7 +156,9 @@ ruptor simulate simulate.yaml --sim frustrated_user
 
 | Variable | Required | Description |
 |---|---|---|
-| `OPENAI_API_KEY` | Yes (for LLM judge) | OpenAI API key for the evaluator and user simulator |
+| `TOOL_BASE_URL` | Yes | Points your agent's tool calls at the ruptor proxy |
+| `OPENAI_API_KEY` | Only for LLM judge | API key for the LLM judge evaluator |
+| `RUPTOR_TOKEN` | Only for --cloud | Auth token for cloud reporting (coming soon) |
 
 ---
 
@@ -161,6 +179,14 @@ make help                   # list all targets
 
 ## Roadmap
 
-- [x] MVP: 6 fault types, chaos testing, simulate module
-- [ ] v2: Custom faults, fault combinations, CI/CD integration
-- [ ] v3: SaaS hosted proxy, dashboard, team collaboration
+- [x] 8 fault types (tool_timeout, slow_response, tool_error,
+      invalid_json, empty_response, rate_limit, llm_error, llm_timeout)
+- [x] ruptor run — chaos proxy with Robustness Score + HTML report
+- [x] ruptor simulate — user simulation with goal completion scoring
+- [x] ruptor auth — OAuth device flow (cloud, coming soon)
+- [x] ruptor doctor — environment diagnostics
+- [x] ruptor update — self-update
+- [x] ruptor sync — sync run results to cloud (coming soon)
+- [ ] Cloud dashboard — run history, team reports, CI/CD integration
+- [ ] MCP proxy support
+- [ ] cascade_failure, partial_degradation enterprise scenarios
