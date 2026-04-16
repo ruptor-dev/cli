@@ -137,7 +137,7 @@ func runChaos(ctx context.Context, cfgPath, outputPath, testFilter string, cloud
 		proxy.WithTimeout(time.Duration(cfg.Proxy.RequestTimeoutS)*time.Second),
 	)
 
-	renderer := rendererFor(cfg.Output, outputPath)
+	renderer := rendererFor(cfg.Output, outputPath, logger)
 
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -342,7 +342,7 @@ func filterTests(tests []config.TestConfig, filter string) ([]config.TestConfig,
 	return out, nil
 }
 
-func rendererFor(outCfg config.OutputConfig, outputPath string) report.Renderer {
+func rendererFor(outCfg config.OutputConfig, outputPath string, logger zerolog.Logger) report.Renderer {
 	format := outCfg.Format
 	path := outCfg.Path
 	if outputPath != "" {
@@ -357,7 +357,7 @@ func rendererFor(outCfg config.OutputConfig, outputPath string) report.Renderer 
 			format = "html"
 		}
 	}
-	return report.NewRendererFromFormat(format, path)
+	return report.NewRendererFromFormat(format, path, logger)
 }
 
 func waitForProxy(ctx context.Context, proxyErrCh chan error, logger zerolog.Logger) error {
@@ -522,7 +522,7 @@ func runSimulate(ctx context.Context, cfgPath, outputPath, simFilter string) err
 	}
 	sim := simulate.NewSimulator(llmClient, &http.Client{Timeout: 60 * time.Second}, logger, cfg.Agent)
 
-	renderer := rendererFor(cfg.Output, outputPath)
+	renderer := rendererFor(cfg.Output, outputPath, logger)
 
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()

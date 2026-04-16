@@ -22,9 +22,11 @@
 - Interception scope: **`tools/call` only**. `initialize`,
   `resources/*`, `prompts/*`, `sampling/*`, `ping`, and all
   notifications pass through unmodified.
-- `mode: auto` sniffs POST bodies via `mcp.IsMCPRequest` and routes
-  JSON-RPC 2.0 to the MCP handler, everything else to the HTTP
-  handler.
+- `mode: auto` dispatch is **not wired** in v1: `mcp.IsMCPRequest`
+  exists as a helper and is unit-tested, but no request path in
+  `internal/proxy/handler.go` consults it. The `auto` value is
+  accepted by config parsing only; use `mode: http` or `mode: mcp`
+  explicitly until the dispatcher lands.
 - Scoping rationale and deferred items: see ADR-011 and
   `docs/specs/backlog/mcp-proxy-mode.md` (Done — 2026-04-16).
 

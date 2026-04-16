@@ -8,13 +8,19 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/rs/zerolog/log"
+	"github.com/rs/zerolog"
 	"github.com/ruptor-dev/cli/pkg/types"
 )
 
 // HTMLRenderer renders reports as HTML files using Go templates.
+//
+// Logger is the structured logger used for non-fatal diagnostics such as
+// a missing embedded template fallback. Callers should inject the
+// process-wide logger (see cmd/ruptor main); the zero value is a
+// disabled logger, matching the rest of the internal/ packages.
 type HTMLRenderer struct {
-	Path string
+	Path   string
+	Logger zerolog.Logger
 }
 
 //go:embed templates/chaos_report.html.tmpl templates/simulate_report.html.tmpl
@@ -110,7 +116,7 @@ func (h *HTMLRenderer) loadTemplate(onDiskPath, embeddedPath string) (*template.
 
 	data, err := embeddedTemplates.ReadFile(embeddedPath)
 	if err != nil {
-		log.Error().Err(err).Str("embedded", embeddedPath).Msg("report: embedded template missing")
+		h.Logger.Error().Err(err).Str("embedded", embeddedPath).Msg("report: embedded template missing")
 		return nil, err
 	}
 	return t.Parse(string(data))

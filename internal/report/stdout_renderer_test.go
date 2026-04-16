@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/rs/zerolog"
 	"github.com/ruptor-dev/cli/pkg/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -231,9 +233,10 @@ func TestNewRendererFromFormat(t *testing.T) {
 		{"", "*report.StdoutRenderer"},
 	}
 
+	silent := zerolog.New(io.Discard)
 	for _, tc := range tests {
 		t.Run(tc.format, func(t *testing.T) {
-			r := NewRendererFromFormat(tc.format, "/tmp/test")
+			r := NewRendererFromFormat(tc.format, "/tmp/test", silent)
 			got := fmt.Sprintf("%T", r)
 			assert.Equal(t, tc.wantType, got)
 		})

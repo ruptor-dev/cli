@@ -1,11 +1,13 @@
 // Package ui is the terminal-output boundary for ruptor.
 //
-// CLAUDE.md forbids fmt.Println / fmt.Printf / log.Printf outside this
-// package — every user-visible line in cmd/ and the rest of internal/
-// must go through a helper defined here. The v1 implementation is
-// deliberately minimal: a writer-backed Println. The bubbletea + lipgloss
-// work lands in a later PR and replaces the internals without changing
-// this API.
+// All user-visible output flows through this package; fmt.Println /
+// fmt.Printf / log.Printf are forbidden elsewhere in cmd/ and
+// internal/. The writer-backed helpers (Println, Success, Error, Info,
+// Warning, Dim) render final and status lines with lipgloss styling
+// from theme.go, while structured diagnostics go through NewLogger,
+// which writes zerolog ConsoleWriter output to stderr. Live run views
+// (NewRunProgress) are bubbletea programs driven by a snapshot
+// callback — see runprogress.go.
 package ui
 
 import (
