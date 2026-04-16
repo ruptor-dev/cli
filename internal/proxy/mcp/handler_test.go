@@ -313,7 +313,8 @@ func TestServeHTTP_BodyOverflow_Returns413(t *testing.T) {
 			Probability: 1.0,
 		},
 	}
-	h := newHandler(t, backend, tests)
+	p := newProxy(t, backend, tests)
+	h := newHandler(t, backend, tests, p)
 
 	// Build a body that starts as JSON-RPC-ish but is MaxBodySize+1 bytes.
 	// Content doesn't matter: the read must fail before Unmarshal.
@@ -336,9 +337,8 @@ func TestServeHTTP_BodyOverflow_Returns413(t *testing.T) {
 	assert.False(t, upstreamHit,
 		"upstream must never receive a truncated over-limit body")
 
-	// Overflow must not pollute hit counts.
-	obs := h.Observations()
-	assert.Empty(t, obs, "over-limit request must not record observations")
+	// Overflow must not pollute hit counts on the sink.
+	assert.Empty(t, p.Observations(), "over-limit request must not record observations")
 }
 
 // TestServeHTTP_BodyExactlyMaxSize_NotRejected confirms the edge case: a
@@ -350,7 +350,8 @@ func TestServeHTTP_BodyExactlyMaxSize_NotRejected(t *testing.T) {
 	backend := mockMCPServer()
 	defer backend.Close()
 
-	h := newHandler(t, backend, nil)
+	p := newProxy(t, backend, nil)
+	h := newHandler(t, backend, nil, p)
 
 	// Exactly MaxBodySize bytes. Use a padded valid JSON-RPC so the
 	// handler parses it and passes through cleanly.
