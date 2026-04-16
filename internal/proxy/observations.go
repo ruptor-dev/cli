@@ -19,6 +19,17 @@ type Observation struct {
 	HadError bool
 }
 
+// Recovered reports whether the observation indicates the agent
+// recovered from an injected fault: at least one fault fired, a
+// follow-up hit was observed on the same tool path, and the most
+// recent response was successful (2xx/3xx). The evaluator consumes
+// this as the recovery signal for BehaviorRecoverySuccess.
+func (o Observation) Recovered() bool {
+	return o.HadError &&
+		o.Hits > o.FaultsInjected &&
+		o.LastStatusCode >= 200 && o.LastStatusCode < 400
+}
+
 // Observations returns a snapshot of per-test observations. Safe to call
 // while the proxy is serving; the returned map is a copy.
 func (p *Proxy) Observations() map[string]Observation {

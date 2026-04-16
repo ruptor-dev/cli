@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/signal"
@@ -311,7 +312,10 @@ func reportPathsFor(_ report.Renderer, outCfg config.OutputConfig, outputPath st
 	case "html":
 		out = append(out, path+"chaos_report.html")
 	case "both":
-		out = append(out, path+"chaos_report.html")
+		out = append(out,
+			path+"chaos_report.html",
+			path+"chaos_report.json",
+		)
 	}
 	return out
 }
@@ -381,7 +385,7 @@ func buildChaosReport(
 	passed, failed := 0, 0
 
 	for _, t := range tests {
-		r := evaluateTest(ctx, eval, t, obs[t.ID], cfg.Evaluation.LLMJudgePrompt, logger)
+		r := evaluateTest(ctx, eval, t, obs[t.ID], nil, cfg.Evaluation.LLMJudgePrompt, logger)
 		r.DurationMs = durations.get(t.ID)
 		if r.Passed {
 			passed++
@@ -414,9 +418,16 @@ func evaluateTest(
 	eval *evaluator.ChaosEvaluator,
 	t config.TestConfig,
 	o proxy.Observation,
+	transcript io.Reader,
 	judgePrompt string,
 	logger zerolog.Logger,
 ) *types.TestResult {
+	behavior := ""
+	if transcript != nil {
+		if b, err := io.ReadAll(transcript); err == nil {
+			behavior = string(b)
+		}
+	}
 	r, err := eval.Evaluate(
 		ctx,
 		t.ID,
@@ -425,9 +436,9 @@ func evaluateTest(
 		o.LastStatusCode,
 		o.Hits,
 		o.HadError,
-		false, // Recovered — wired when retry-aware proxy lands
+		o.Recovered(),
 		judgePrompt,
-		"", // agent behavior transcript — collected in a later PR
+		behavior,
 	)
 	if err != nil {
 		logger.Warn().
