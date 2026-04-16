@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"sync"
 	"testing"
 
 	"github.com/rs/zerolog"
@@ -19,6 +20,76 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// obsRecord mirrors the fields the handler used to track internally. It
+// lives in the test package so the handler can stay ignorant of how its
+// observations are stored.
+type obsRecord struct {
+	Hits           int
+	FaultsInjected int
+	LastStatusCode int
+	HadError       bool
+}
+
+// fakeSink implements mcp.ObservationSink for unit tests. It keeps a
+// local map so assertions remain independent of the real *proxy.Proxy.
+type fakeSink struct {
+	mu  sync.Mutex
+	obs map[string]*obsRecord
+}
+
+func newFakeSink() *fakeSink {
+	return &fakeSink{obs: map[string]*obsRecord{}}
+}
+
+func (f *fakeSink) ensure(id string) *obsRecord {
+	o, ok := f.obs[id]
+	if !ok {
+		o = &obsRecord{}
+		f.obs[id] = o
+	}
+	return o
+}
+
+func (f *fakeSink) RecordFault(id string, sc int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	o := f.ensure(id)
+	o.Hits++
+	o.FaultsInjected++
+	o.LastStatusCode = sc
+	o.HadError = true
+}
+
+func (f *fakeSink) RecordPassthrough(id string, sc int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	o := f.ensure(id)
+	o.Hits++
+	o.LastStatusCode = sc
+}
+
+func (f *fakeSink) snapshot(id string) obsRecord {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if o, ok := f.obs[id]; ok {
+		return *o
+	}
+	return obsRecord{}
+}
+
+func (f *fakeSink) contains(id string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	_, ok := f.obs[id]
+	return ok
+}
+
+func (f *fakeSink) empty() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.obs) == 0
+}
 
 // mockMCPServer returns an httptest.Server that responds to JSON-RPC 2.0
 // requests with valid tool call results.
@@ -48,14 +119,15 @@ func mockMCPServer() *httptest.Server {
 	}))
 }
 
-func newHandler(t *testing.T, backend *httptest.Server, tests []config.TestConfig) *mcp.Handler {
+func newHandler(t *testing.T, backend *httptest.Server, tests []config.TestConfig) (*mcp.Handler, *fakeSink) {
 	t.Helper()
 	target, err := url.Parse(backend.URL)
 	require.NoError(t, err)
 
 	logger := zerolog.Nop()
 	rng := rand.New(rand.NewSource(42))
-	return mcp.NewHandler(target, tests, faults.NewFaultRegistry(), logger, rng)
+	sink := newFakeSink()
+	return mcp.NewHandler(target, tests, faults.NewFaultRegistry(), logger, rng, sink), sink
 }
 
 func jsonRPCBody(method string, id interface{}, params interface{}) []byte {
@@ -83,7 +155,7 @@ func TestMCPToolsCall_FaultInjection(t *testing.T) {
 		},
 	}
 
-	h := newHandler(t, backend, tests)
+	h, sink := newHandler(t, backend, tests)
 	body := jsonRPCBody("tools/call", 1, map[string]interface{}{
 		"name":      "search",
 		"arguments": map[string]string{"query": "test"},
@@ -105,12 +177,12 @@ func TestMCPToolsCall_FaultInjection(t *testing.T) {
 	assert.Equal(t, -32603, resp.Error.Code)
 	assert.Equal(t, "search service unavailable", resp.Error.Message)
 
-	// Check observation was recorded.
-	obs := h.Observations()
-	require.Contains(t, obs, "test-search-error")
-	assert.Equal(t, 1, obs["test-search-error"].Hits)
-	assert.Equal(t, 1, obs["test-search-error"].FaultsInjected)
-	assert.True(t, obs["test-search-error"].HadError)
+	// Check observation was recorded via the sink.
+	require.True(t, sink.contains("test-search-error"))
+	obs := sink.snapshot("test-search-error")
+	assert.Equal(t, 1, obs.Hits)
+	assert.Equal(t, 1, obs.FaultsInjected)
+	assert.True(t, obs.HadError)
 }
 
 func TestMCPToolsCall_Passthrough(t *testing.T) {
@@ -126,7 +198,7 @@ func TestMCPToolsCall_Passthrough(t *testing.T) {
 		},
 	}
 
-	h := newHandler(t, backend, tests)
+	h, sink := newHandler(t, backend, tests)
 	body := jsonRPCBody("tools/call", 42, map[string]interface{}{
 		"name":      "search",
 		"arguments": map[string]string{"query": "hello"},
@@ -148,10 +220,10 @@ func TestMCPToolsCall_Passthrough(t *testing.T) {
 	assert.NotNil(t, resp.Result, "expected result from backend")
 
 	// Check observation — hit recorded but no fault.
-	obs := h.Observations()
-	require.Contains(t, obs, "test-search-pass")
-	assert.Equal(t, 1, obs["test-search-pass"].Hits)
-	assert.Equal(t, 0, obs["test-search-pass"].FaultsInjected)
+	require.True(t, sink.contains("test-search-pass"))
+	obs := sink.snapshot("test-search-pass")
+	assert.Equal(t, 1, obs.Hits)
+	assert.Equal(t, 0, obs.FaultsInjected)
 }
 
 func TestMCPNonToolCall_Passthrough(t *testing.T) {
@@ -167,7 +239,7 @@ func TestMCPNonToolCall_Passthrough(t *testing.T) {
 		},
 	}
 
-	h := newHandler(t, backend, tests)
+	h, sink := newHandler(t, backend, tests)
 	// Send an "initialize" request — should pass through unmodified.
 	body := jsonRPCBody("initialize", 1, map[string]interface{}{
 		"protocolVersion": "2025-03-26",
@@ -189,8 +261,7 @@ func TestMCPNonToolCall_Passthrough(t *testing.T) {
 	assert.NotNil(t, resp.Result)
 
 	// No observations should be recorded for non-tool-call methods.
-	obs := h.Observations()
-	assert.Empty(t, obs)
+	assert.True(t, sink.empty())
 }
 
 func TestMCPRateLimitFault(t *testing.T) {
@@ -207,7 +278,7 @@ func TestMCPRateLimitFault(t *testing.T) {
 		},
 	}
 
-	h := newHandler(t, backend, tests)
+	h, _ := newHandler(t, backend, tests)
 	body := jsonRPCBody("tools/call", 1, map[string]interface{}{"name": "search"})
 
 	rec := httptest.NewRecorder()
@@ -237,7 +308,7 @@ func TestMCPInvalidJSONFault(t *testing.T) {
 		},
 	}
 
-	h := newHandler(t, backend, tests)
+	h, _ := newHandler(t, backend, tests)
 	body := jsonRPCBody("tools/call", 1, map[string]interface{}{"name": "search"})
 
 	rec := httptest.NewRecorder()
@@ -265,7 +336,7 @@ func TestMCPEmptyResponseFault(t *testing.T) {
 		},
 	}
 
-	h := newHandler(t, backend, tests)
+	h, _ := newHandler(t, backend, tests)
 	body := jsonRPCBody("tools/call", 1, map[string]interface{}{"name": "search"})
 
 	rec := httptest.NewRecorder()
@@ -297,7 +368,7 @@ func TestServeHTTP_BodyOverflow_Returns413(t *testing.T) {
 			Probability: 1.0,
 		},
 	}
-	h := newHandler(t, backend, tests)
+	h, sink := newHandler(t, backend, tests)
 
 	// Build a body that starts as JSON-RPC-ish but is MaxBodySize+1 bytes.
 	// Content doesn't matter: the read must fail before Unmarshal.
@@ -321,8 +392,7 @@ func TestServeHTTP_BodyOverflow_Returns413(t *testing.T) {
 		"upstream must never receive a truncated over-limit body")
 
 	// Overflow must not pollute hit counts.
-	obs := h.Observations()
-	assert.Empty(t, obs, "over-limit request must not record observations")
+	assert.True(t, sink.empty(), "over-limit request must not record observations")
 }
 
 // TestServeHTTP_BodyExactlyMaxSize_NotRejected confirms the edge case: a
@@ -334,7 +404,7 @@ func TestServeHTTP_BodyExactlyMaxSize_NotRejected(t *testing.T) {
 	backend := mockMCPServer()
 	defer backend.Close()
 
-	h := newHandler(t, backend, nil)
+	h, _ := newHandler(t, backend, nil)
 
 	// Exactly MaxBodySize bytes. Use a padded valid JSON-RPC so the
 	// handler parses it and passes through cleanly.

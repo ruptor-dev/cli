@@ -30,42 +30,35 @@ import (
 // forwarded upstream and does not count toward any test's observation stats.
 const MaxBodySize = 10 << 20 // 10 MB
 
-// Observation accumulates per-test signals the proxy collects while the
-// agent exercises a path. Identical to proxy.Observation — kept as a type
-// alias-compatible struct so the MCP handler can be consumed without
-// importing the parent proxy package (which would create a cycle).
-type Observation struct {
-	TestID         string
-	Hits           int
-	FaultsInjected int
-	LastStatusCode int
-	HadError       bool
-}
-
 // Handler is the MCP-aware HTTP handler that sits in front of a JSON-RPC
 // 2.0 MCP server. It intercepts tools/call requests for fault injection
-// and passes everything else through.
+// and passes everything else through. Per-test observations are handed to
+// the owning proxy via the ObservationSink interface.
 type Handler struct {
 	tests    []config.TestConfig
 	registry *faults.FaultRegistry
 	target   *url.URL
 	logger   zerolog.Logger
 	rng      *rand.Rand
+	sink     ObservationSink
 
-	mu  sync.Mutex
-	obs map[string]*Observation
-	rp  *httputil.ReverseProxy
-
+	// mu guards activeTest only. Observation state lives on the sink.
+	mu         sync.Mutex
 	activeTest string
+
+	rp *httputil.ReverseProxy
 }
 
-// NewHandler constructs an MCP handler.
+// NewHandler constructs an MCP handler. The sink receives per-test
+// observations — typically the surrounding *proxy.Proxy, so MCP and HTTP
+// paths share a single observation map.
 func NewHandler(
 	target *url.URL,
 	tests []config.TestConfig,
 	registry *faults.FaultRegistry,
 	logger zerolog.Logger,
 	rng *rand.Rand,
+	sink ObservationSink,
 ) *Handler {
 	h := &Handler{
 		tests:    tests,
@@ -73,7 +66,7 @@ func NewHandler(
 		target:   target,
 		logger:   logger,
 		rng:      rng,
-		obs:      make(map[string]*Observation),
+		sink:     sink,
 	}
 	h.rp = &httputil.ReverseProxy{
 		Director: func(req *http.Request) {
@@ -91,25 +84,6 @@ func (h *Handler) SetActiveTest(id string) {
 	h.mu.Lock()
 	h.activeTest = id
 	h.mu.Unlock()
-}
-
-// Observations returns a snapshot of per-test observations.
-func (h *Handler) Observations() map[string]Observation {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-
-	out := make(map[string]Observation, len(h.obs))
-	for id, o := range h.obs {
-		out[id] = *o
-	}
-	return out
-}
-
-// ResetObservation clears stats for a single test ID.
-func (h *Handler) ResetObservation(testID string) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	delete(h.obs, testID)
 }
 
 // ServeHTTP implements http.Handler. It peeks at the request body to
@@ -235,7 +209,7 @@ func (h *Handler) injectFault(w http.ResponseWriter, r *http.Request, rpcReq typ
 		select {
 		case <-timer.C:
 		case <-r.Context().Done():
-			h.recordFault(t.ID, 0)
+			h.sink.RecordFault(t.ID, 0)
 			return
 		}
 	}
@@ -276,13 +250,13 @@ func (h *Handler) injectFault(w http.ResponseWriter, r *http.Request, rpcReq typ
 		if _, err := w.Write([]byte(payload)); err != nil {
 			h.logger.Debug().Err(err).Msg("mcp: write invalid-json payload")
 		}
-		h.recordFault(t.ID, statusCode)
+		h.sink.RecordFault(t.ID, statusCode)
 		return
 
 	case types.FaultEmptyResponse:
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(statusCode)
-		h.recordFault(t.ID, statusCode)
+		h.sink.RecordFault(t.ID, statusCode)
 		return
 
 	case types.FaultRateLimit:
@@ -313,7 +287,7 @@ func (h *Handler) injectFault(w http.ResponseWriter, r *http.Request, rpcReq typ
 	if err != nil {
 		h.logger.Error().Err(err).Msg("mcp: marshal fault response")
 		http.Error(w, "internal error", http.StatusInternalServerError)
-		h.recordFault(t.ID, http.StatusInternalServerError)
+		h.sink.RecordFault(t.ID, http.StatusInternalServerError)
 		return
 	}
 
@@ -322,7 +296,7 @@ func (h *Handler) injectFault(w http.ResponseWriter, r *http.Request, rpcReq typ
 	if _, err := w.Write(data); err != nil {
 		h.logger.Debug().Err(err).Msg("mcp: write fault response")
 	}
-	h.recordFault(t.ID, statusCode)
+	h.sink.RecordFault(t.ID, statusCode)
 }
 
 // passthrough forwards the request to the upstream MCP server.
@@ -336,7 +310,7 @@ func (h *Handler) passthrough(w http.ResponseWriter, r *http.Request, testID str
 	h.rp.ServeHTTP(rec, r)
 
 	if testID != "" {
-		h.recordPassthrough(testID, rec.status)
+		h.sink.RecordPassthrough(testID, rec.status)
 	}
 }
 
@@ -365,35 +339,6 @@ func extractToolName(params interface{}) string {
 		return ""
 	}
 	return tc.Name
-}
-
-func (h *Handler) recordFault(testID string, statusCode int) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-
-	o := h.ensureObs(testID)
-	o.Hits++
-	o.FaultsInjected++
-	o.LastStatusCode = statusCode
-	o.HadError = true
-}
-
-func (h *Handler) recordPassthrough(testID string, statusCode int) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-
-	o := h.ensureObs(testID)
-	o.Hits++
-	o.LastStatusCode = statusCode
-}
-
-func (h *Handler) ensureObs(testID string) *Observation {
-	o, ok := h.obs[testID]
-	if !ok {
-		o = &Observation{TestID: testID}
-		h.obs[testID] = o
-	}
-	return o
 }
 
 // statusRecorder captures the HTTP status code written by the reverse proxy.

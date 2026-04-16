@@ -87,11 +87,15 @@ func NewProxy(cfg *config.ProxyConfig, tests []config.TestConfig, registry *faul
 		opt(p)
 	}
 
-	// Initialise MCP handler for "mcp" or "auto" modes.
+	// Initialise MCP handler for "mcp" or "auto" modes. p satisfies
+	// mcp.ObservationSink via RecordFault/RecordPassthrough, so MCP
+	// observations land in the same map the evaluator reads via
+	// p.Observations(). See docs/specs/backlog/mcp-observations-evaluator.md.
 	mode := strings.ToLower(string(cfg.Mode))
 	if mode == "mcp" || mode == "auto" {
 		if target, err := url.Parse(cfg.PassthroughURL); err == nil {
-			p.mcpHandler = mcp.NewHandler(target, tests, registry, p.logger, rand.New(rand.NewSource(time.Now().UnixNano())))
+			p.mcpHandler = mcp.NewHandler(target, tests, registry, p.logger,
+				rand.New(rand.NewSource(time.Now().UnixNano())), p)
 		}
 	}
 
