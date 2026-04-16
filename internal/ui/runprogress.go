@@ -59,7 +59,23 @@ type RunContext struct {
 	Port       int
 	Entrypoint string
 	Snapshot   SnapshotFn
+	// LogReader, when non-nil, mounts a log panel between the
+	// Experiments box and the Robustness bar. Per docs/specs/ui.md
+	// (`Run progress TUI with --verbose`). Layer 1 contract: tail
+	// only, fixed height, no scroll. Pass *LogBuffer or any other
+	// LogReader implementation.
+	LogReader LogReader
 }
+
+// LogPanelHeight is the visible-row count of the verbose-mode log
+// panel. Box border + title add 2 lines on top.
+const LogPanelHeight = 12
+
+// LogPanelMaxLineLen caps each rendered log line so a stray multi-KB
+// trace does not blow the panel's width. Suggested cap when wiring
+// the LogBuffer; the panel itself does NOT re-truncate (the buffer
+// owns truncation so multiple readers see the same string).
+const LogPanelMaxLineLen = 240
 
 // runModel is the Bubbletea model driving the live TUI.
 type runModel struct {
@@ -182,6 +198,10 @@ func (m runModel) View() tea.View {
 	b.WriteString("\n")
 	b.WriteString(m.renderExperiments())
 	b.WriteString("\n")
+	if m.ctx.LogReader != nil {
+		b.WriteString(m.renderLogPanel())
+		b.WriteString("\n")
+	}
 	b.WriteString(m.renderScore())
 	b.WriteString("\n\n")
 	b.WriteString(m.renderFooter())
@@ -227,6 +247,35 @@ func (m runModel) renderExperiments() string {
 		Padding(0, 2)
 
 	return box.Render(title + "\n" + body)
+}
+
+// renderLogPanel mounts the verbose-mode log tail between the
+// Experiments box and the Robustness bar. Layer 1 contract per
+// docs/specs/ui.md: tail-only (last LogPanelHeight lines), bordered
+// box matching the Experiments style, no scroll. The buffer owns
+// truncation; the panel only pads short renders so the box height
+// stays stable as the buffer fills.
+func (m runModel) renderLogPanel() string {
+	label := " Logs · tail · -v "
+	lines := m.ctx.LogReader.Lines(LogPanelHeight)
+
+	body := make([]string, 0, LogPanelHeight)
+	for _, l := range lines {
+		body = append(body, l)
+	}
+	// Pad to constant height so the Robustness bar does not bounce
+	// up and down each tick as the buffer warms.
+	for len(body) < LogPanelHeight {
+		body = append(body, "")
+	}
+
+	title := lipgloss.NewStyle().Foreground(Theme.Muted).Render(label)
+	box := lipgloss.NewStyle().
+		Border(lipgloss.NormalBorder()).
+		BorderForeground(Theme.Border).
+		Padding(0, 2)
+
+	return box.Render(title + "\n" + strings.Join(body, "\n"))
 }
 
 func renderExperimentLine(e ExperimentState) string {

@@ -66,6 +66,73 @@ Status icons:
 - ◌ yellow = running
 - ○ muted = pending
 
+## Run progress TUI with `--verbose` (`-v`) — log panel
+
+When the operator passes `-v` / `--verbose` to `ruptor run`, the TUI
+keeps rendering AND a fixed-height log panel is inserted between the
+Experiments box and the Robustness bar. The panel tails the runner /
+proxy event stream; the same events still land in
+`<runDir>/ruptor.log` for post-run inspection.
+
+```
+  ┌─ Experiments ─────────────────────── 3/8 ──┐
+  │  ✓  timeout_on_search     847ms   PASSED    │
+  │  ◌  slow_response         running...        │
+  │  ○  tool_error            pending           │
+  │   …                                         │
+  └─────────────────────────────────────────────┘
+
+  ┌─ Logs ────────────────────────── tail · -v ──┐
+  │ INF  proxy: injecting fault   tool=/search   │
+  │ INF  runner: oneshot agent started  pid=…    │
+  │ INF  proxy: injecting fault   tool=/llm/…    │
+  │ ERR  proxy: inject fault      "context …"    │
+  │  …                                            │
+  └──────────────────────────────────────────────┘
+
+  Robustness  ██████████████░░░░░░  68%
+
+  Press q to abort  •  r to retry failed
+```
+
+### Layer 1 — minimum viable (`tail` only, no scroll)
+
+- Panel is a bordered box matching the Experiments style.
+- Fixed height: 12 visible rows (configurable via `LogPanelHeight`).
+- Auto-tail: the most recent N lines of a thread-safe ring buffer.
+- The buffer is owned by the `ui` package, NOT the caller; callers
+  receive a `LogReader` via `RunContext.LogReader` and write to the
+  buffer through `io.Writer` (the buffer also satisfies `io.Writer`
+  so zerolog can target it directly via `io.MultiWriter(file, buf)`).
+- Lines longer than the panel width are truncated with `…`. ANSI
+  escapes are preserved (zerolog `ConsoleWriter` colours render
+  inside the panel) and ignored when measuring width.
+- No keyboard or mouse handling on the panel — it is read-only.
+
+### Layer 2 — scrollable (deferred, `charm.land/bubbles/v2`)
+
+When the panel needs real scroll, mouse-wheel, or pause-tail, replace
+the inline render with a `viewport.Model` from `charm.land/bubbles/v2`.
+That dep is the only addition. New keybindings introduced at that
+point:
+- `↑` / `↓` / `PgUp` / `PgDn` — scroll
+- `s` — toggle auto-tail (sticky bottom vs. paused)
+- mouse wheel — scroll when the terminal supports mouse capture
+
+Layer 2 is OUT for the minimum-viable rollout; do not pull in bubbles
+until the operator explicitly asks for scroll.
+
+### Verbose semantics
+
+- **Default (no `-v`)**: TUI renders without the log panel. Logger
+  writes only to `<runDir>/ruptor.log`. Terminal stays clean.
+- **`-v` interactive (TTY)**: TUI renders WITH the log panel. Logger
+  writes to `io.MultiWriter(file, buffer)`. Stderr stays untouched
+  so the panel does not double-render via the terminal's scrollback.
+- **`-v` non-interactive (CI, pipe)**: TUI is skipped (no TTY).
+  Logger streams to stderr in addition to the file, matching the
+  pre-panel verbose behaviour for scripts that grep stdout/stderr.
+
 ## Completion screen
 
 ```

@@ -107,7 +107,7 @@ func newRunCmd() *cobra.Command {
 	cmd.Flags().StringVar(&outputPath, "output", "", "output file path for the report")
 	cmd.Flags().StringVar(&testFilter, "test", "", "run only the test with this ID")
 	cmd.Flags().BoolVar(&cloudFlag, "cloud", false, "spool report to ~/.ruptor/pending/ for upload by `ruptor sync`")
-	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "stream runner/proxy logs to stderr (disables the TUI; logs still land in <runDir>/ruptor.log)")
+	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "tail runner/proxy logs in a TUI panel (interactive) or stream to stderr (CI/pipe). Logs always land in <runDir>/ruptor.log.")
 
 	return cmd
 }
@@ -133,27 +133,37 @@ func runChaos(ctx context.Context, cfgPath, outputPath, testFilter string, cloud
 		rootLogger.Warn().Err(err).Msg("could not create run log dir; continuing with default logger")
 	}
 
+	// Verbose + interactive: route logger to file + an in-memory ring
+	// buffer the TUI tails in its log panel. Stderr stays untouched
+	// so the panel does not double-render in the terminal scrollback.
+	// Verbose + non-interactive (CI / pipe): no TUI to feed; tee to
+	// stderr alongside the file, matching pre-panel verbose behaviour
+	// for scripts that grep stdout. Non-verbose: file only, terminal
+	// stays clean for the TUI.
 	logger := rootLogger
 	logFilePath := ""
+	var logBuffer *ui.LogBuffer
+	if verbose && ui.IsInteractive() {
+		logBuffer = ui.NewLogBuffer(1024, ui.LogPanelMaxLineLen)
+	}
 	if runDir != "" {
 		logFilePath = filepath.Join(runDir, "ruptor.log")
 		if f, err := os.Create(logFilePath); err == nil {
-			// Verbose opts into log-vs-TUI interleave: events land in
-			// both ruptor.log and the operator's terminal. The live
-			// TUI is unchanged; the operator explicitly asked to see
-			// the stream.
-			if verbose {
+			defer f.Close()
+			switch {
+			case logBuffer != nil:
+				logger = ui.NewLoggerTo(io.MultiWriter(f, logBuffer), ui.LogInfo)
+			case verbose:
 				logger = ui.NewLoggerTo(io.MultiWriter(f, os.Stderr), ui.LogInfo)
-			} else {
+			default:
 				logger = ui.NewLoggerTo(f, ui.LogInfo)
 			}
-			defer f.Close()
 		} else {
 			logFilePath = ""
 		}
-	} else if verbose {
-		// No run dir — fall back to rootLogger (stderr). Matches the
-		// verbose contract even when we could not open the log file.
+	} else if verbose && logBuffer == nil {
+		// No run dir AND non-interactive: fall back to rootLogger
+		// (stderr) so verbose still produces visible output.
 		logger = ui.NewLogger(ui.LogInfo)
 	}
 
@@ -196,25 +206,26 @@ func runChaos(ctx context.Context, cfgPath, outputPath, testFilter string, cloud
 	// Build the TUI program up-front (if interactive) so the
 	// orchestrator can send it ForceSnapshotMsg + a 50ms render
 	// grace right after the last durations.set, guaranteeing the
-	// "4/4 → final %" frame lands before ctx cancels.
-	// Verbose disables the TUI: the live render repaints every tick
-	// via cursor-up + overwrite, so any stderr write between ticks is
-	// erased on the next paint. If the operator wants to watch the
-	// log stream, the TUI is in their way — skip it and let the
-	// orchestrator run with logs flowing to stderr.
+	// "4/4 → final %" frame lands before ctx cancels. With --verbose
+	// the TUI also mounts a log panel that tails the in-memory ring
+	// buffer (see docs/specs/ui.md `Run progress TUI with --verbose`).
 	var prog *ui.Program
-	if ui.IsInteractive() && !verbose {
+	if ui.IsInteractive() {
 		boundPort := waitAndReadBoundPort(ctx, p, 10*time.Second)
 		if boundPort == 0 {
 			boundPort = cfg.Proxy.Port
 		}
-		prog = ui.NewRunProgress(ui.RunContext{
+		runCtx := ui.RunContext{
 			ConfigFile: cfg.Agent.Name,
 			AgentName:  cfg.Agent.Name,
 			Port:       boundPort,
 			Entrypoint: cfg.Agent.Entrypoint,
 			Snapshot:   snapshotFn(tests, p, durations, cfg.Evaluation.MaxIterations, ctx),
-		})
+		}
+		if logBuffer != nil {
+			runCtx.LogReader = logBuffer
+		}
+		prog = ui.NewRunProgress(runCtx)
 	}
 	flush := func() {
 		if prog != nil {
