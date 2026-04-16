@@ -13,7 +13,6 @@ import (
 
 	"github.com/rs/zerolog"
 	"github.com/ruptor-dev/cli/internal/config"
-	"github.com/ruptor-dev/cli/internal/proxy"
 	"github.com/ruptor-dev/cli/internal/proxy/faults"
 	"github.com/ruptor-dev/cli/internal/proxy/mcp"
 	"github.com/ruptor-dev/cli/pkg/types"
@@ -45,29 +44,18 @@ func mockMCPServer() *httptest.Server {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(resp)
+		json.NewEncoder(w).Encode(resp)
 	}))
 }
 
-// newProxy constructs a Proxy configured against the backend. It serves
-// as the ObservationSink for the MCP handler under test; its HTTP
-// behaviour is unused in most MCP tests.
-func newProxy(t *testing.T, backend *httptest.Server, tests []config.TestConfig) *proxy.Proxy {
-	t.Helper()
-	cfg := &config.ProxyConfig{Port: 0, PassthroughURL: backend.URL}
-	return proxy.NewProxy(cfg, tests, faults.NewFaultRegistry(),
-		proxy.WithLogger(zerolog.Nop()),
-	)
-}
-
-func newHandler(t *testing.T, backend *httptest.Server, tests []config.TestConfig, sink proxy.ObservationSink) *mcp.Handler {
+func newHandler(t *testing.T, backend *httptest.Server, tests []config.TestConfig) *mcp.Handler {
 	t.Helper()
 	target, err := url.Parse(backend.URL)
 	require.NoError(t, err)
 
 	logger := zerolog.Nop()
 	rng := rand.New(rand.NewSource(42))
-	return mcp.NewHandler(target, tests, faults.NewFaultRegistry(), logger, rng, sink)
+	return mcp.NewHandler(target, tests, faults.NewFaultRegistry(), logger, rng)
 }
 
 func jsonRPCBody(method string, id interface{}, params interface{}) []byte {
@@ -95,8 +83,7 @@ func TestMCPToolsCall_FaultInjection(t *testing.T) {
 		},
 	}
 
-	p := newProxy(t, backend, tests)
-	h := newHandler(t, backend, tests, p)
+	h := newHandler(t, backend, tests)
 	body := jsonRPCBody("tools/call", 1, map[string]interface{}{
 		"name":      "search",
 		"arguments": map[string]string{"query": "test"},
@@ -118,7 +105,8 @@ func TestMCPToolsCall_FaultInjection(t *testing.T) {
 	assert.Equal(t, -32603, resp.Error.Code)
 	assert.Equal(t, "search service unavailable", resp.Error.Message)
 
-	obs := p.Observations()
+	// Check observation was recorded.
+	obs := h.Observations()
 	require.Contains(t, obs, "test-search-error")
 	assert.Equal(t, 1, obs["test-search-error"].Hits)
 	assert.Equal(t, 1, obs["test-search-error"].FaultsInjected)
@@ -138,8 +126,7 @@ func TestMCPToolsCall_Passthrough(t *testing.T) {
 		},
 	}
 
-	p := newProxy(t, backend, tests)
-	h := newHandler(t, backend, tests, p)
+	h := newHandler(t, backend, tests)
 	body := jsonRPCBody("tools/call", 42, map[string]interface{}{
 		"name":      "search",
 		"arguments": map[string]string{"query": "hello"},
@@ -160,7 +147,8 @@ func TestMCPToolsCall_Passthrough(t *testing.T) {
 	assert.Nil(t, resp.Error, "expected no JSON-RPC error")
 	assert.NotNil(t, resp.Result, "expected result from backend")
 
-	obs := p.Observations()
+	// Check observation — hit recorded but no fault.
+	obs := h.Observations()
 	require.Contains(t, obs, "test-search-pass")
 	assert.Equal(t, 1, obs["test-search-pass"].Hits)
 	assert.Equal(t, 0, obs["test-search-pass"].FaultsInjected)
@@ -179,8 +167,7 @@ func TestMCPNonToolCall_Passthrough(t *testing.T) {
 		},
 	}
 
-	p := newProxy(t, backend, tests)
-	h := newHandler(t, backend, tests, p)
+	h := newHandler(t, backend, tests)
 	// Send an "initialize" request — should pass through unmodified.
 	body := jsonRPCBody("initialize", 1, map[string]interface{}{
 		"protocolVersion": "2025-03-26",
@@ -202,7 +189,7 @@ func TestMCPNonToolCall_Passthrough(t *testing.T) {
 	assert.NotNil(t, resp.Result)
 
 	// No observations should be recorded for non-tool-call methods.
-	obs := p.Observations()
+	obs := h.Observations()
 	assert.Empty(t, obs)
 }
 
@@ -220,8 +207,7 @@ func TestMCPRateLimitFault(t *testing.T) {
 		},
 	}
 
-	p := newProxy(t, backend, tests)
-	h := newHandler(t, backend, tests, p)
+	h := newHandler(t, backend, tests)
 	body := jsonRPCBody("tools/call", 1, map[string]interface{}{"name": "search"})
 
 	rec := httptest.NewRecorder()
@@ -251,8 +237,7 @@ func TestMCPInvalidJSONFault(t *testing.T) {
 		},
 	}
 
-	p := newProxy(t, backend, tests)
-	h := newHandler(t, backend, tests, p)
+	h := newHandler(t, backend, tests)
 	body := jsonRPCBody("tools/call", 1, map[string]interface{}{"name": "search"})
 
 	rec := httptest.NewRecorder()
@@ -280,8 +265,7 @@ func TestMCPEmptyResponseFault(t *testing.T) {
 		},
 	}
 
-	p := newProxy(t, backend, tests)
-	h := newHandler(t, backend, tests, p)
+	h := newHandler(t, backend, tests)
 	body := jsonRPCBody("tools/call", 1, map[string]interface{}{"name": "search"})
 
 	rec := httptest.NewRecorder()
@@ -313,8 +297,7 @@ func TestServeHTTP_BodyOverflow_Returns413(t *testing.T) {
 			Probability: 1.0,
 		},
 	}
-	p := newProxy(t, backend, tests)
-	h := newHandler(t, backend, tests, p)
+	h := newHandler(t, backend, tests)
 
 	// Build a body that starts as JSON-RPC-ish but is MaxBodySize+1 bytes.
 	// Content doesn't matter: the read must fail before Unmarshal.
@@ -337,8 +320,9 @@ func TestServeHTTP_BodyOverflow_Returns413(t *testing.T) {
 	assert.False(t, upstreamHit,
 		"upstream must never receive a truncated over-limit body")
 
-	// Overflow must not pollute hit counts on the sink.
-	assert.Empty(t, p.Observations(), "over-limit request must not record observations")
+	// Overflow must not pollute hit counts.
+	obs := h.Observations()
+	assert.Empty(t, obs, "over-limit request must not record observations")
 }
 
 // TestServeHTTP_BodyExactlyMaxSize_NotRejected confirms the edge case: a
@@ -350,8 +334,7 @@ func TestServeHTTP_BodyExactlyMaxSize_NotRejected(t *testing.T) {
 	backend := mockMCPServer()
 	defer backend.Close()
 
-	p := newProxy(t, backend, nil)
-	h := newHandler(t, backend, nil, p)
+	h := newHandler(t, backend, nil)
 
 	// Exactly MaxBodySize bytes. Use a padded valid JSON-RPC so the
 	// handler parses it and passes through cleanly.
@@ -412,135 +395,4 @@ func TestMCPIsMCPRequest(t *testing.T) {
 			assert.Equal(t, tt.expect, got)
 		})
 	}
-}
-
-// TestMCPObservationsFlowToProxy drives a fault-injecting tools/call
-// through the MCP handler and asserts the owning Proxy's observations
-// reflect the hit + fault — the end-to-end wire the evaluator reads.
-func TestMCPObservationsFlowToProxy(t *testing.T) {
-	backend := mockMCPServer()
-	defer backend.Close()
-
-	tests := []config.TestConfig{
-		{
-			ID:          "mcp-search-timeout",
-			Tool:        "search",
-			Fault:       types.FaultToolTimeout,
-			Probability: 1.0,
-		},
-	}
-
-	p := newProxy(t, backend, tests)
-	h := newHandler(t, backend, tests, p)
-	body := jsonRPCBody("tools/call", 7, map[string]interface{}{
-		"name":      "search",
-		"arguments": map[string]string{"q": "mcp"},
-	})
-
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	h.ServeHTTP(rec, req)
-
-	require.Equal(t, http.StatusOK, rec.Code)
-
-	obs := p.Observations()
-	require.Contains(t, obs, "mcp-search-timeout",
-		"MCP handler fault must flow to the Proxy's observation store")
-
-	got := obs["mcp-search-timeout"]
-	assert.Equal(t, 1, got.Hits)
-	assert.Equal(t, 1, got.FaultsInjected)
-	assert.True(t, got.HadError, "JSON-RPC timeout fault must set HadError")
-}
-
-// TestMCPObservations_Passthrough confirms a non-tool-call method passes
-// through and records nothing — the sink is only written for intercepted
-// tool calls that match a configured test.
-func TestMCPObservations_Passthrough(t *testing.T) {
-	backend := mockMCPServer()
-	defer backend.Close()
-
-	tests := []config.TestConfig{
-		{
-			ID:          "mcp-search-pass",
-			Tool:        "search",
-			Fault:       types.FaultToolError,
-			Probability: 1.0,
-		},
-	}
-
-	p := newProxy(t, backend, tests)
-	h := newHandler(t, backend, tests, p)
-	// initialize is not tools/call — must not write to the sink.
-	body := jsonRPCBody("initialize", 1, map[string]interface{}{})
-
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	h.ServeHTTP(rec, req)
-
-	require.Equal(t, http.StatusOK, rec.Code)
-
-	obs := p.Observations()
-	assert.Empty(t, obs,
-		"non-tool-call passthrough must not record observations")
-}
-
-// TestMCPObservations_PreservesExistingHTTPObservations verifies the MCP
-// handler's writes do not clobber HTTP-mode observations on the same
-// Proxy — both paths compose into a single observation map.
-func TestMCPObservations_PreservesExistingHTTPObservations(t *testing.T) {
-	backend := mockMCPServer()
-	defer backend.Close()
-
-	tests := []config.TestConfig{
-		{
-			ID:          "http-api-error",
-			Tool:        "/api/call",
-			Fault:       types.FaultToolError,
-			Probability: 1.0,
-			StatusCode:  503,
-			Body:        "boom",
-		},
-		{
-			ID:          "mcp-search-error",
-			Tool:        "search",
-			Fault:       types.FaultToolError,
-			Probability: 1.0,
-		},
-	}
-
-	p := newProxy(t, backend, tests)
-
-	// First drive the HTTP handler to populate an HTTP observation.
-	httpRec := httptest.NewRecorder()
-	httpReq := httptest.NewRequest(http.MethodPost, "/api/call", nil)
-	p.ServeHTTP(httpRec, httpReq)
-	require.Equal(t, 503, httpRec.Code)
-
-	// Then drive the MCP handler, sharing the same Proxy as sink.
-	h := newHandler(t, backend, tests, p)
-	body := jsonRPCBody("tools/call", 1, map[string]interface{}{
-		"name": "search",
-	})
-	mcpRec := httptest.NewRecorder()
-	mcpReq := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(body))
-	mcpReq.Header.Set("Content-Type", "application/json")
-	h.ServeHTTP(mcpRec, mcpReq)
-	require.Equal(t, http.StatusOK, mcpRec.Code)
-
-	obs := p.Observations()
-
-	httpObs, ok := obs["http-api-error"]
-	require.True(t, ok, "HTTP observation must still be present after MCP traffic")
-	assert.Equal(t, 1, httpObs.Hits)
-	assert.Equal(t, 1, httpObs.FaultsInjected)
-	assert.Equal(t, 503, httpObs.LastStatusCode)
-
-	mcpObs, ok := obs["mcp-search-error"]
-	require.True(t, ok, "MCP observation must be recorded")
-	assert.Equal(t, 1, mcpObs.Hits)
-	assert.Equal(t, 1, mcpObs.FaultsInjected)
-	assert.True(t, mcpObs.HadError)
 }

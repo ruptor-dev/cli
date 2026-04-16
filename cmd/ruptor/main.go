@@ -5,11 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -20,6 +21,7 @@ import (
 	"github.com/ruptor-dev/cli/internal/config"
 	"github.com/ruptor-dev/cli/internal/evaluator"
 	"github.com/ruptor-dev/cli/internal/evaluator/llmjudge"
+	"github.com/ruptor-dev/cli/internal/evaluator/rules"
 	"github.com/ruptor-dev/cli/internal/llmclient"
 	"github.com/ruptor-dev/cli/internal/proxy"
 	"github.com/ruptor-dev/cli/internal/proxy/faults"
@@ -108,8 +110,6 @@ func newRunCmd() *cobra.Command {
 }
 
 func runChaos(ctx context.Context, cfgPath, outputPath, testFilter string, cloudFlag bool) error {
-	logger := rootLogger
-
 	cfg, err := config.LoadChaos(cfgPath)
 	if err != nil {
 		return fmt.Errorf("loading config: %w", err)
@@ -120,19 +120,25 @@ func runChaos(ctx context.Context, cfgPath, outputPath, testFilter string, cloud
 		return err
 	}
 
-	// Create the run log dir first so the interactive TUI can silence
-	// stderr logging (proxy/runner events would otherwise fight with
-	// bubbletea for the terminal). The logs still land on disk.
+	// Open the run log directory and redirect the logger into
+	// ruptor.log BEFORE constructing any component that captures a
+	// logger reference. While the TUI owns the terminal, zerolog
+	// must not touch stdout or stderr — both share the tty and
+	// interleave with Bubbletea's render escape sequences.
 	runDir, err := newRunLogDir()
 	if err != nil {
-		logger.Warn().Err(err).Msg("could not create run log dir; agent stdout will go to a temp file")
+		rootLogger.Warn().Err(err).Msg("could not create run log dir; continuing with default logger")
 	}
 
-	if ui.IsInteractive() && runDir != "" {
-		logPath := filepath.Join(runDir, "run.log")
-		if f, ferr := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644); ferr == nil {
-			defer f.Close()
+	logger := rootLogger
+	logFilePath := ""
+	if runDir != "" {
+		logFilePath = filepath.Join(runDir, "ruptor.log")
+		if f, err := os.Create(logFilePath); err == nil {
 			logger = ui.NewLoggerTo(f, ui.LogInfo)
+			defer f.Close()
+		} else {
+			logFilePath = ""
 		}
 	}
 
@@ -153,7 +159,7 @@ func runChaos(ctx context.Context, cfgPath, outputPath, testFilter string, cloud
 		proxy.WithTimeout(time.Duration(cfg.Proxy.RequestTimeoutS)*time.Second),
 	)
 
-	renderer := rendererFor(cfg.Output, outputPath, logger)
+	renderer := rendererFor(cfg.Output, outputPath)
 
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -172,6 +178,31 @@ func runChaos(ctx context.Context, cfgPath, outputPath, testFilter string, cloud
 	durations := newDurationTracker()
 	runStart := time.Now()
 
+	// Build the TUI program up-front (if interactive) so the
+	// orchestrator can send it ForceSnapshotMsg + a 50ms render
+	// grace right after the last durations.set, guaranteeing the
+	// "4/4 → final %" frame lands before ctx cancels.
+	var prog *ui.Program
+	if ui.IsInteractive() {
+		boundPort := waitAndReadBoundPort(ctx, p, 10*time.Second)
+		if boundPort == 0 {
+			boundPort = cfg.Proxy.Port
+		}
+		prog = ui.NewRunProgress(ui.RunContext{
+			ConfigFile: cfg.Agent.Name,
+			AgentName:  cfg.Agent.Name,
+			Port:       boundPort,
+			Entrypoint: cfg.Agent.Entrypoint,
+			Snapshot:   snapshotFn(tests, p, durations, cfg.Evaluation.MaxIterations, ctx),
+		})
+	}
+	flush := func() {
+		if prog != nil {
+			prog.Send(ui.ForceSnapshotMsg{})
+			time.Sleep(50 * time.Millisecond)
+		}
+	}
+
 	// Warn once per run when MCP mode could plausibly be exercised.
 	// Faults still fire on the wire, but MCP observations are not yet
 	// wired to the evaluator — see docs/specs/backlog/mcp-observations-evaluator.md.
@@ -179,10 +210,10 @@ func runChaos(ctx context.Context, cfgPath, outputPath, testFilter string, cloud
 
 	orchErrCh := make(chan error, 1)
 	go func() {
-		orchErrCh <- orchestrateExperiments(ctx, stop, cfg, tests, p, runDir, durations, logger)
+		orchErrCh <- orchestrateExperiments(ctx, stop, cfg, tests, p, runDir, durations, flush, logger)
 	}()
 
-	if err := runChaosTUI(ctx, stop, cfg, tests, p); err != nil {
+	if err := runChaosTUI(ctx, stop, prog); err != nil {
 		return err
 	}
 
@@ -221,6 +252,7 @@ func runChaos(ctx context.Context, cfgPath, outputPath, testFilter string, cloud
 		Failed:       rpt.Failed,
 		ReportPaths:  reportPathsFor(renderer, cfg.Output, outputPath),
 		AgentLogDir:  runDir,
+		LogPath:      logFilePath,
 	})
 
 	logger.Info().
@@ -238,19 +270,11 @@ func runChaos(ctx context.Context, cfgPath, outputPath, testFilter string, cloud
 // observations every tick is O(tests) under a mutex — fast enough for
 // v1 at the default 100ms tick. See AUDIT.md §10 for the push-channel
 // follow-up.
-func runChaosTUI(ctx context.Context, stop context.CancelFunc, cfg *config.ChaosConfig, tests []config.TestConfig, p *proxy.Proxy) error {
-	if !ui.IsInteractive() {
+func runChaosTUI(ctx context.Context, stop context.CancelFunc, prog *ui.Program) error {
+	if prog == nil {
 		<-ctx.Done()
 		return nil
 	}
-
-	prog := ui.NewRunProgress(ui.RunContext{
-		ConfigFile: cfg.Agent.Name,
-		AgentName:  cfg.Agent.Name,
-		Port:       cfg.Proxy.Port,
-		Entrypoint: cfg.Agent.Entrypoint,
-		Snapshot:   snapshotFn(tests, p, ctx),
-	})
 
 	go func() {
 		<-ctx.Done()
@@ -268,49 +292,69 @@ func runChaosTUI(ctx context.Context, stop context.CancelFunc, cfg *config.Chaos
 	return nil
 }
 
-// snapshotFn builds the callback the TUI polls on every tick. It maps
-// the proxy's observation map into the UI's ExperimentState slice,
-// preserving the configured test order (observations map is
-// unordered).
-func snapshotFn(tests []config.TestConfig, p *proxy.Proxy, ctx context.Context) ui.SnapshotFn {
+// snapshotFn builds the callback the TUI polls every tick. The
+// durationTracker is authoritative for per-experiment lifecycle —
+// orchestrator marks each test running/done unambiguously — while
+// proxy observations decide pass vs fail once the experiment ends.
+//
+// The pass/fail projection mirrors the evaluator's rules (see
+// internal/evaluator/rules/classify.go) so the live TUI and
+// the final Robustness Score agree. A `HadError=true` that came
+// from the injected fault itself (a 504 on tool_timeout, a 5xx on
+// tool_error / llm_error) is the expected response — treating it as
+// a TUI failure would contradict the evaluator and show a 62 % bar
+// that immediately jumps to 100 % on the completion screen.
+func snapshotFn(tests []config.TestConfig, p *proxy.Proxy, d *durationTracker, maxIterations int, ctx context.Context) ui.SnapshotFn {
 	return func() ui.RunSnapshot {
 		obs := p.Observations()
 		exps := make([]ui.ExperimentState, 0, len(tests))
-		passed, total := 0, 0
+		passed, finished := 0, 0
 		for _, t := range tests {
-			o := obs[t.ID]
-			seen := o.Hits > 0
+			done, running := d.status(t.ID)
+			var status ui.ExperimentStatus
+			switch {
+			case done:
+				// Delegate to the single source of truth. The TUI
+				// skips the LLM judge; the judge can only further
+				// downgrade a pass, never promote, so its absence
+				// here is conservative.
+				v := rules.ClassifyExperiment(t.Fault, maxIterations, rules.Obs{
+					Hits:           obs[t.ID].Hits,
+					LastStatusCode: obs[t.ID].LastStatusCode,
+					HadError:       obs[t.ID].HadError,
+				}, d.getAgentError(t.ID))
+				if v.Passed {
+					status = ui.StatusPassed
+					passed++
+				} else {
+					status = ui.StatusFailed
+				}
+				finished++
+			case running:
+				status = ui.StatusRunning
+			default:
+				status = ui.StatusPending
+			}
 			exps = append(exps, ui.ExperimentState{
-				ID:     t.ID,
-				Status: statusFromObs(o, seen),
+				ID:       t.ID,
+				Status:   status,
+				Duration: time.Duration(d.get(t.ID)) * time.Millisecond,
 			})
-			if seen && !o.HadError {
-				passed++
-			}
-			if seen {
-				total++
-			}
 		}
 		score := 0
-		if total > 0 {
-			score = (passed * 100) / total
+		if finished > 0 {
+			score = (passed * 100) / finished
 		}
 		return ui.RunSnapshot{
 			Experiments:  exps,
 			ScorePercent: score,
-			Done:         ctx.Err() != nil,
+			// Only natural completion flips Done. Aborts via ctx
+			// cancellation go through the prog.Quit path in the
+			// ctx-watcher goroutine — avoiding `ctx.Err() != nil`
+			// here prevents a race where ctx cancels the TUI
+			// before the final finished==total snapshot lands.
+			Done: finished == len(tests),
 		}
-	}
-}
-
-func statusFromObs(o proxy.Observation, seen bool) ui.ExperimentStatus {
-	switch {
-	case !seen:
-		return ui.StatusPending
-	case o.HadError:
-		return ui.StatusFailed
-	default:
-		return ui.StatusPassed
 	}
 }
 
@@ -353,7 +397,7 @@ func filterTests(tests []config.TestConfig, filter string) ([]config.TestConfig,
 	return out, nil
 }
 
-func rendererFor(outCfg config.OutputConfig, outputPath string, logger zerolog.Logger) report.Renderer {
+func rendererFor(outCfg config.OutputConfig, outputPath string) report.Renderer {
 	format := outCfg.Format
 	path := outCfg.Path
 	if outputPath != "" {
@@ -368,7 +412,7 @@ func rendererFor(outCfg config.OutputConfig, outputPath string, logger zerolog.L
 			format = "html"
 		}
 	}
-	return report.NewRendererFromFormat(format, path, logger)
+	return report.NewRendererFromFormat(format, path)
 }
 
 func waitForProxy(ctx context.Context, proxyErrCh chan error, logger zerolog.Logger) error {
@@ -402,7 +446,7 @@ func buildChaosReport(
 	passed, failed := 0, 0
 
 	for _, t := range tests {
-		r := evaluateTest(ctx, eval, t, obs[t.ID], nil, cfg.Evaluation.LLMJudgePrompt, logger)
+		r := evaluateTest(ctx, eval, t, obs[t.ID], durations.getAgentError(t.ID), cfg.Evaluation.LLMJudgePrompt, logger)
 		r.DurationMs = durations.get(t.ID)
 		if r.Passed {
 			passed++
@@ -435,16 +479,10 @@ func evaluateTest(
 	eval *evaluator.ChaosEvaluator,
 	t config.TestConfig,
 	o proxy.Observation,
-	transcript io.Reader,
+	agentErr error,
 	judgePrompt string,
 	logger zerolog.Logger,
 ) *types.TestResult {
-	behavior := ""
-	if transcript != nil {
-		if b, err := io.ReadAll(transcript); err == nil {
-			behavior = string(b)
-		}
-	}
 	r, err := eval.Evaluate(
 		ctx,
 		t.ID,
@@ -454,8 +492,9 @@ func evaluateTest(
 		o.Hits,
 		o.HadError,
 		o.Recovered(),
+		agentErr,
 		judgePrompt,
-		behavior,
+		"", // agent behavior transcript — collected in a later PR
 	)
 	if err != nil {
 		logger.Warn().
@@ -533,7 +572,7 @@ func runSimulate(ctx context.Context, cfgPath, outputPath, simFilter string) err
 	}
 	sim := simulate.NewSimulator(llmClient, &http.Client{Timeout: 60 * time.Second}, logger, cfg.Agent)
 
-	renderer := rendererFor(cfg.Output, outputPath, logger)
+	renderer := rendererFor(cfg.Output, outputPath)
 
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -711,36 +750,6 @@ func newVersionCmd() *cobra.Command {
 // helpers
 // ---------------------------------------------------------------------------
 
-// mcpUnscoredWarning is surfaced once per run whenever proxy mode is
-// "mcp" or "auto" — i.e. whenever MCP traffic could plausibly be
-// exercised during this run. MCP observations are not yet wired into
-// the evaluator (see docs/specs/backlog/mcp-observations-evaluator.md),
-// so the Robustness Score and per-test hits will read zero for MCP
-// tests even though the faults fire correctly on the wire. The
-// warning stays live until that spec lands.
-const mcpUnscoredWarning = "MCP observation wiring is not yet in the evaluator (see " +
-	"docs/specs/backlog/mcp-observations-evaluator.md). Faults will " +
-	"fire correctly on the wire, but per-test hits and Robustness " +
-	"Score will report zero for MCP tests until this lands."
-
-// warnIfMCPModeUnscored emits mcpUnscoredWarning once per run when the
-// config's proxy.mode could cause MCP traffic to flow through the
-// handler (either explicit ProxyModeMCP or ProxyModeAuto which may pick
-// MCP at runtime). Pure HTTP runs are silent. Called at the top of the
-// run orchestration — not during config load — so `ruptor validate`
-// and similar one-off checks do not pollute the terminal.
-//
-// Validate() is the single gate that canonicalises cfg.Proxy.Mode, so
-// this helper compares against the typed constants directly. Anything
-// non-canonical (e.g. "MCP", " mcp ") was rejected at load time and
-// cannot reach here.
-func warnIfMCPModeUnscored(cfg *config.ChaosConfig) {
-	switch cfg.Proxy.Mode {
-	case config.ProxyModeMCP, config.ProxyModeAuto:
-		ui.Warning(mcpUnscoredWarning)
-	}
-}
-
 func buildJudge(useLLM bool, logger zerolog.Logger) (llmjudge.Judge, error) {
 	if !useLLM {
 		return &llmjudge.NoopJudge{}, nil
@@ -821,6 +830,7 @@ func orchestrateExperiments(
 	p *proxy.Proxy,
 	runDir string,
 	durations *durationTracker,
+	flush func(),
 	logger zerolog.Logger,
 ) error {
 	defer stop()
@@ -847,14 +857,25 @@ func orchestrateExperiments(
 
 	logger.Info().Str("mode", mode).Str("run_dir", runDir).Msg("runner: agent lifecycle starting")
 
+	var runErr error
 	switch mode {
 	case agentModePersistent:
-		return runPersistent(ctx, cfg, tests, p, runDir, timeout, durations, logger)
+		runErr = runPersistent(ctx, cfg, tests, p, runDir, timeout, durations, logger)
 	case agentModeOneshot:
-		return runOneshot(ctx, cfg, tests, p, runDir, timeout, durations, logger)
+		runErr = runOneshot(ctx, cfg, tests, p, runDir, timeout, durations, logger)
 	default:
 		return fmt.Errorf("runner: unknown agent.mode %q (want oneshot|persistent)", mode)
 	}
+
+	// Force the TUI to take a final snapshot now that every
+	// durations.set has landed, then give Bubbletea 50ms to paint
+	// the "N/N" + final-% frame before deferred stop() cancels ctx
+	// and tears the UI down.
+	if ctx.Err() == nil && runErr == nil && flush != nil {
+		flush()
+	}
+
+	return runErr
 }
 
 func runPersistent(
@@ -884,10 +905,14 @@ func runPersistent(
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
+		p.ResetObservation(t.ID)
+		p.SetActiveTest(t.ID)
 		start := time.Now()
+		durations.markRunning(t.ID)
 		waitForHitsOrTimeout(ctx, p, t.ID, timeout, agent)
 		durations.set(t.ID, time.Since(start).Milliseconds())
 	}
+	p.SetActiveTest("")
 	return nil
 }
 
@@ -906,16 +931,26 @@ func runOneshot(
 			return ctx.Err()
 		}
 		logPath := filepath.Join(runDir, fmt.Sprintf("agent-%02d-%s.log", i+1, safeFile(t.ID)))
+		p.ResetObservation(t.ID)
+		p.SetActiveTest(t.ID)
 		start := time.Now()
+		durations.markRunning(t.ID)
 		agent, err := runner.Start(ctx, runner.Config{
 			Entrypoint: cfg.Agent.Entrypoint,
 			Env:        cfg.Agent.Env,
 			LogPath:    logPath,
 		})
 		if err != nil {
-			logger.Warn().Err(err).Str("test", t.ID).Msg("runner: could not start agent")
+			// Hard fail: if we cannot spawn the entrypoint (binary
+			// not on PATH, bad shebang, permission denied) then every
+			// experiment will fail the same way. Marking the
+			// experiment PASS because the proxy never saw a hit
+			// would be lying to the user. Abort the run with the
+			// actual exec error so they can fix it (typically: swap
+			// `python` for `python3`, or activate the venv).
+			logger.Error().Err(err).Str("test", t.ID).Msg("runner: could not start agent — aborting run")
 			durations.set(t.ID, time.Since(start).Milliseconds())
-			continue
+			return fmt.Errorf("agent entrypoint failed to start: %w (check cfg.agent.entrypoint and $PATH)", err)
 		}
 		logger.Info().
 			Int("pid", agent.PID()).
@@ -923,10 +958,20 @@ func runOneshot(
 			Str("log", logPath).
 			Msg("runner: oneshot agent started")
 
-		waitForHitsOrTimeout(ctx, p, t.ID, timeout, agent)
+		// Oneshot: wait for the agent to exit ON ITS OWN. Hits>0 is
+		// NOT a valid completion signal here — the agent may have
+		// received the fault and still be in the middle of its
+		// fallback logic (Retry-After sleep, cached-response
+		// lookup, etc). Killing it at first hit truncates the
+		// behaviour we're trying to measure.
+		_ = agent.Wait(ctx, timeout)
 		_ = agent.Stop(runner.DefaultStopGrace)
+		if exitErr := agent.ExitErr(); exitErr != nil {
+			durations.setAgentError(t.ID, exitErr)
+		}
 		durations.set(t.ID, time.Since(start).Milliseconds())
 	}
+	p.SetActiveTest("")
 	return nil
 }
 
@@ -937,15 +982,24 @@ func runOneshot(
 // guards the (brief) concurrent window where the TUI is being torn
 // down.
 type durationTracker struct {
-	mu sync.Mutex
-	m  map[string]int64
+	mu         sync.Mutex
+	m          map[string]int64
+	running    map[string]bool
+	agentError map[string]error
 }
 
-func newDurationTracker() *durationTracker { return &durationTracker{m: map[string]int64{}} }
+func newDurationTracker() *durationTracker {
+	return &durationTracker{
+		m:          map[string]int64{},
+		running:    map[string]bool{},
+		agentError: map[string]error{},
+	}
+}
 
 func (d *durationTracker) set(id string, ms int64) {
 	d.mu.Lock()
 	d.m[id] = ms
+	delete(d.running, id)
 	d.mu.Unlock()
 }
 
@@ -953,6 +1007,40 @@ func (d *durationTracker) get(id string) int64 {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	return d.m[id]
+}
+
+func (d *durationTracker) markRunning(id string) {
+	d.mu.Lock()
+	d.running[id] = true
+	d.mu.Unlock()
+}
+
+// setAgentError records a non-nil exit from the agent child process.
+// buildChaosReport combines this with the proxy hit count to decide
+// whether the experiment actually exercised the fault path or the
+// agent crashed immediately (ImportError, missing venv, etc).
+func (d *durationTracker) setAgentError(id string, err error) {
+	if err == nil {
+		return
+	}
+	d.mu.Lock()
+	d.agentError[id] = err
+	d.mu.Unlock()
+}
+
+func (d *durationTracker) getAgentError(id string) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.agentError[id]
+}
+
+// status returns (done, running) under a single lock.
+func (d *durationTracker) status(id string) (done, running bool) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	_, done = d.m[id]
+	running = d.running[id]
+	return
 }
 
 // waitForHitsOrTimeout returns as soon as any completion signal fires:
@@ -1011,6 +1099,30 @@ func waitProxyReady(ctx context.Context, p *proxy.Proxy, timeout time.Duration) 
 // newRunLogDir returns ~/.ruptor/runs/<UTC-timestamp>/ creating the
 // tree as needed. Agents stream stdout/stderr into files under this
 // directory so they never pollute the TUI.
+// waitAndReadBoundPort polls proxy.Addr() until the listener is bound
+// or timeout expires, returning the numeric port the OS actually
+// accepted. listenWithFallback may have stepped past the requested
+// port when busy; the TUI header must reflect reality so users
+// retarget their agent correctly. Returns 0 on timeout.
+func waitAndReadBoundPort(ctx context.Context, p *proxy.Proxy, timeout time.Duration) int {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if addr := p.Addr(); addr != "" {
+			if _, portStr, err := net.SplitHostPort(addr); err == nil {
+				if port, err := strconv.Atoi(portStr); err == nil {
+					return port
+				}
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return 0
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
+	return 0
+}
+
 func newRunLogDir() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -1022,6 +1134,30 @@ func newRunLogDir() (string, error) {
 		return "", err
 	}
 	return dir, nil
+}
+
+// mcpUnscoredWarning is the copy shown once per run when proxy.mode
+// could plausibly route traffic through the MCP handler. The MCP
+// handler records its own observations; they are not merged into the
+// proxy's observation map the evaluator consumes. Users running a
+// chaos experiment in that state see faults fire correctly but get
+// zero hits in the Robustness Score. The warning stays live until
+// docs/specs/backlog/mcp-observations-evaluator.md lands.
+const mcpUnscoredWarning = "MCP observation wiring is not yet in the evaluator " +
+	"(see docs/specs/backlog/mcp-observations-evaluator.md). Faults will " +
+	"fire correctly on the wire, but per-test hits and Robustness Score " +
+	"will report zero for MCP tests until this lands."
+
+// warnIfMCPModeUnscored prints the above warning when cfg.Proxy.Mode is
+// ProxyModeMCP or ProxyModeAuto — the two modes that can route traffic
+// through the MCP handler. Called once at the top of the run, not
+// during config load, so `ruptor validate` and similar dry checks stay
+// silent.
+func warnIfMCPModeUnscored(cfg *config.ChaosConfig) {
+	switch cfg.Proxy.Mode {
+	case config.ProxyModeMCP, config.ProxyModeAuto:
+		ui.Warning(mcpUnscoredWarning)
+	}
 }
 
 // safeFile scrubs characters that would make a file name awkward on

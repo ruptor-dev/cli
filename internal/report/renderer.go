@@ -3,7 +3,6 @@ package report
 import (
 	"os"
 
-	"github.com/rs/zerolog"
 	"github.com/ruptor-dev/cli/pkg/types"
 )
 
@@ -40,21 +39,23 @@ func (m *MultiRenderer) RenderSimulate(report *types.ConversationReport) error {
 
 // NewRendererFromFormat creates a Renderer for the given output format.
 // Supported formats: "stdout", "json", "html", "both" (stdout + html).
-// path is the output directory for json/html files. logger is used by
-// renderers that emit diagnostics (currently only HTMLRenderer, for
-// template-load failures); pass the process-wide logger from the
-// caller.
-func NewRendererFromFormat(format, path string, logger zerolog.Logger) Renderer {
+// path is the output directory for json/html files.
+func NewRendererFromFormat(format, path string) Renderer {
 	switch format {
 	case "json":
 		return &JSONRenderer{Path: path}
 	case "html":
-		return &HTMLRenderer{Path: path, Logger: logger}
+		return &HTMLRenderer{Path: path}
 	case "both":
+		// "both" means HTML + JSON. The verbose text block that
+		// used to print to stdout duplicated what the completion
+		// summary already shows and the HTML covers in detail; the
+		// completion summary is the single source of truth at the
+		// tty while the HTML/JSON files carry every row.
 		return &MultiRenderer{
 			renderers: []Renderer{
-				&StdoutRenderer{Writer: os.Stdout},
-				&HTMLRenderer{Path: path, Logger: logger},
+				&HTMLRenderer{Path: path},
+				&JSONRenderer{Path: path},
 			},
 		}
 	default:

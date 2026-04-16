@@ -2,38 +2,31 @@ package ui
 
 import "fmt"
 
-// Success prints a green check-marked line to stderr. Use for completed
-// actions. Routed to stderr because Success is a status confirmation,
-// not pipeable data — audit of call sites (auth login/logout, doctor
-// check rows, sync per-file acknowledgements, update up-to-date) shows
-// every caller uses it diagnostically.
+// Success prints a green check-marked line. Use for completed actions.
 func Success(msg string) {
-	fmt.Fprintln(errOut, styleSuccess.Render("✓ ")+styleInfo.Render(msg))
+	fmt.Fprintln(out, styleSuccess.Render("✓ ")+styleInfo.Render(msg))
 }
 
-// Error prints a red ✗ line to stderr. Tell the user what to do next.
+// Error prints a red ✗ line. Tell the user what to do next.
 // Bad:  "authentication error"
 // Good: "Session expired. Run `ruptor auth login` to reconnect."
 func Error(msg string) {
-	fmt.Fprintln(errOut, styleFailure.Render("✗ ")+styleInfo.Render(msg))
+	fmt.Fprintln(out, styleFailure.Render("✗ ")+styleInfo.Render(msg))
 }
 
-// Info prints a plain line with a subtle ▸ prefix to stderr. Info is
-// status-shaped (auth URLs, waitlist notices, sync counts), never
-// pipeable data — routed to stderr so `ruptor ... | jq` stays clean.
+// Info prints a plain line with a subtle ▸ prefix.
 func Info(msg string) {
-	fmt.Fprintln(errOut, styleSubtle.Render("▸ ")+styleInfo.Render(msg))
+	fmt.Fprintln(out, styleSubtle.Render("▸ ")+styleInfo.Render(msg))
 }
 
-// Warning prints a yellow warning line to stderr.
+// Warning prints a yellow warning line.
 func Warning(msg string) {
-	fmt.Fprintln(errOut, styleWarning.Render("⚠ ")+styleInfo.Render(msg))
+	fmt.Fprintln(out, styleWarning.Render("⚠ ")+styleInfo.Render(msg))
 }
 
-// Dim prints a muted informational line to stderr (e.g. "Checking for
-// updates...").
+// Dim prints a muted informational line (e.g. "Checking for updates...").
 func Dim(msg string) {
-	fmt.Fprintln(errOut, styleMuted.Render(msg))
+	fmt.Fprintln(out, styleMuted.Render(msg))
 }
 
 // AuthMessage maps an auth error to a user-facing line that tells the
@@ -69,19 +62,17 @@ func authMsg(err error) (string, bool) {
 	return err.Error(), false
 }
 
-// VersionBanner prints the new-version footer described in SKILL-ui.md
-// to stderr. Never called at startup — only at the end of a command
-// when a newer version is available. Non-blocking. Routed to stderr
-// because it is a diagnostic notification appended after the command's
-// real output, not part of the pipeable data stream.
+// VersionBanner prints the new-version footer described in docs/specs/ui.md.
+// Never called at startup — only at the end of a command when a newer
+// version is available. Non-blocking.
 func VersionBanner(current, available string) {
 	if available == "" || available == current {
 		return
 	}
 	line := fmt.Sprintf("⚡ ruptor %s available  →  ruptor update", available)
 	sep := styleMuted.Render("─────────────────────────────────────────────")
-	fmt.Fprintln(errOut, "")
-	fmt.Fprintln(errOut, sep)
-	fmt.Fprintln(errOut, "  "+stylePrimary.Render(line))
-	fmt.Fprintln(errOut, sep)
+	fmt.Fprintln(out, "")
+	fmt.Fprintln(out, sep)
+	fmt.Fprintln(out, "  "+stylePrimary.Render(line))
+	fmt.Fprintln(out, sep)
 }

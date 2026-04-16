@@ -1,13 +1,11 @@
 // Package ui is the terminal-output boundary for ruptor.
 //
-// All user-visible output flows through this package; fmt.Println /
-// fmt.Printf / log.Printf are forbidden elsewhere in cmd/ and
-// internal/. The writer-backed helpers (Println, Success, Error, Info,
-// Warning, Dim) render final and status lines with lipgloss styling
-// from theme.go, while structured diagnostics go through NewLogger,
-// which writes zerolog ConsoleWriter output to stderr. Live run views
-// (NewRunProgress) are bubbletea programs driven by a snapshot
-// callback — see runprogress.go.
+// docs/engineering.md forbids fmt.Println / fmt.Printf / log.Printf outside this
+// package — every user-visible line in cmd/ and the rest of internal/
+// must go through a helper defined here. The v1 implementation is
+// deliberately minimal: a writer-backed Println. The bubbletea + lipgloss
+// work lands in a later PR and replaces the internals without changing
+// this API.
 package ui
 
 import (
@@ -16,32 +14,20 @@ import (
 	"os"
 )
 
-// out carries data (pipeable); errOut carries diagnostics (warnings, errors).
-var (
-	out    io.Writer = os.Stdout
-	errOut io.Writer = os.Stderr
-)
+var out io.Writer = os.Stdout
 
-// SetWriter overrides the data-stream writer (stdout). Intended for tests
-// that capture pipeable output.
+// SetWriter overrides the destination writer. Intended for tests.
 func SetWriter(w io.Writer) { out = w }
 
-// SetErrWriter overrides the diagnostic-stream writer (stderr). Intended
-// for tests that capture warnings, errors, and other diagnostic output.
-func SetErrWriter(w io.Writer) { errOut = w }
-
-// Writer returns the current data-stream writer.
+// Writer returns the current destination writer.
 func Writer() io.Writer { return out }
 
-// ErrWriter returns the current diagnostic-stream writer.
-func ErrWriter() io.Writer { return errOut }
-
-// Println writes a line of plain text followed by a newline to stdout.
+// Println writes a line of plain text followed by a newline.
 func Println(s string) {
 	fmt.Fprintln(out, s)
 }
 
-// Printf writes formatted text with no trailing newline to stdout.
+// Printf writes formatted text with no trailing newline.
 func Printf(format string, a ...any) {
 	fmt.Fprintf(out, format, a...)
 }

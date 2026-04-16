@@ -19,15 +19,23 @@ type Observation struct {
 	HadError bool
 }
 
-// Recovered reports whether the observation indicates the agent
-// recovered from an injected fault: at least one fault fired, a
-// follow-up hit was observed on the same tool path, and the most
-// recent response was successful (2xx/3xx). The evaluator consumes
-// this as the recovery signal for BehaviorRecoverySuccess.
+// Recovered returns true when the observation indicates the agent
+// retried after a fault and eventually received a successful response.
 func (o Observation) Recovered() bool {
-	return o.HadError &&
-		o.Hits > o.FaultsInjected &&
+	return o.HadError && o.Hits > o.FaultsInjected &&
 		o.LastStatusCode >= 200 && o.LastStatusCode < 400
+}
+
+// ResetObservation clears the accumulated stats for a single test ID.
+// The orchestrator calls this at the start of each experiment so the
+// evaluator sees only the current experiment's activity rather than
+// the whole run's — necessary because the proxy's first-match test
+// dispatch routes every request on a given tool to the first test
+// that declared that tool, regardless of which experiment is active.
+func (p *Proxy) ResetObservation(testID string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	delete(p.obs, testID)
 }
 
 // Observations returns a snapshot of per-test observations. Safe to call
@@ -43,20 +51,8 @@ func (p *Proxy) Observations() map[string]Observation {
 	return out
 }
 
-// ObservationSink is the contract for recording per-test proxy
-// observations. Both HTTP and MCP handlers write through it; the Proxy
-// is the sole implementation.
-type ObservationSink interface {
-	RecordFault(testID string, statusCode int)
-	RecordPassthrough(testID string, statusCode int)
-}
-
-// RecordFault updates the observation for a fault-injected request. A
-// call to RecordFault is by definition an error — the proxy fired a
-// fault on the matched test, regardless of whether the transport-level
-// status code reflects it (MCP fault responses use HTTP 200 and carry
-// the error in the JSON-RPC envelope).
-func (p *Proxy) RecordFault(testID string, statusCode int) {
+// recordFault updates the observation for a fault-injected request.
+func (p *Proxy) recordFault(testID string, statusCode int) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -64,13 +60,17 @@ func (p *Proxy) RecordFault(testID string, statusCode int) {
 	o.Hits++
 	o.FaultsInjected++
 	o.LastStatusCode = statusCode
-	o.HadError = true
+	if statusCode >= 400 || statusCode == 0 {
+		// statusCode == 0 represents "no status written" (e.g. timeout
+		// fault that closes the socket or returns 504 without body).
+		o.HadError = true
+	}
 }
 
-// RecordPassthrough updates the observation for a matched-but-not-fired
+// recordPassthrough updates the observation for a matched-but-not-fired
 // request that was proxied through. We track only the hit count and
 // status code so the evaluator sees whether the path was exercised.
-func (p *Proxy) RecordPassthrough(testID string, statusCode int) {
+func (p *Proxy) recordPassthrough(testID string, statusCode int) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -89,4 +89,11 @@ func (p *Proxy) ensureObs(testID string) *Observation {
 		p.obs[testID] = o
 	}
 	return o
+}
+
+// MCPHandler returns the MCP handler if one is configured (mode "mcp" or
+// "auto"), nil otherwise. The orchestrator uses this to access MCP-specific
+// observations.
+func (p *Proxy) MCPHandler() interface{} {
+	return p.mcpHandler
 }

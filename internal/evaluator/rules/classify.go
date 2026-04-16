@@ -91,10 +91,13 @@ func ClassifyExperiment(
 		behaviors = append(behaviors, types.BehaviorCrash)
 	}
 
-	// Loop detection: tighter bound for error faults with an observed
-	// error (retry threshold 2), otherwise the configured max iterations.
+	// Loop detection: tighter bound for error faults when the fault
+	// response actually fired (5xx status), otherwise the configured
+	// max iterations. Derived from status rather than HadError because
+	// HadError is a coarser signal — `llm_error/503/2` is a retry-loop
+	// anti-pattern whether or not the runner propagated HadError.
 	loopThreshold := maxIterations
-	if obs.HadError {
+	if obs.LastStatusCode >= 500 && obs.LastStatusCode < 600 {
 		switch faultType {
 		case types.FaultToolError, types.FaultLLMError:
 			loopThreshold = 2

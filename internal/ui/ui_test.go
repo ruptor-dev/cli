@@ -46,7 +46,7 @@ func TestRenderCompletion_ContainsSummary(t *testing.T) {
 		ReportPaths:  []string{"./reports/run.html"},
 	})
 	plain := stripAnsi(s)
-	assert.Contains(t, plain, "Robustness Score")
+	assert.Contains(t, plain, "Score:")
 	assert.Contains(t, plain, "82%")
 	assert.Contains(t, plain, "6 passed")
 	assert.Contains(t, plain, "2 failed")
@@ -84,15 +84,11 @@ func TestFormatDuration(t *testing.T) {
 	}
 }
 
-func TestOutputHelpers_WriteThroughErrWriter(t *testing.T) {
-	// Success/Error/Info/Warning/Dim are diagnostic helpers routed to
-	// stderr — capture via SetErrWriter, not SetWriter. This guards the
-	// stdout-vs-stderr split: any helper that regressed to stdout would
-	// silently drop from the buffer and fail the assertion below.
+func TestOutputHelpers_WriteThroughWriter(t *testing.T) {
 	var buf bytes.Buffer
-	prev := ErrWriter()
-	SetErrWriter(&buf)
-	defer SetErrWriter(prev)
+	prev := Writer()
+	SetWriter(&buf)
+	defer SetWriter(prev)
 
 	Success("saved")
 	Error("bad")
@@ -104,21 +100,6 @@ func TestOutputHelpers_WriteThroughErrWriter(t *testing.T) {
 	for _, want := range []string{"saved", "bad", "here", "watch", "idle"} {
 		assert.Contains(t, plain, want)
 	}
-}
-
-func TestPlainHelpers_WriteThroughWriter(t *testing.T) {
-	// Println/Printf carry pipeable data and must stay on stdout.
-	var buf bytes.Buffer
-	prev := Writer()
-	SetWriter(&buf)
-	defer SetWriter(prev)
-
-	Println("line")
-	Printf("formatted %d\n", 7)
-
-	got := buf.String()
-	assert.Contains(t, got, "line")
-	assert.Contains(t, got, "formatted 7")
 }
 
 func TestIconFor(t *testing.T) {

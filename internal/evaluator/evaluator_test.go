@@ -47,9 +47,12 @@ func TestChaosEvaluator_Evaluate(t *testing.T) {
 			wantBehaviors: nil,
 		},
 		{
-			name:          "crash detected fails",
+			// Real upstream crash (invalid_json fault did NOT inject
+			// this 500 — it's a genuine server error). CrashDetector
+			// fires, agent did not recover → FAIL.
+			name:          "real upstream crash fails",
 			testID:        "test-2",
-			faultType:     types.FaultToolError,
+			faultType:     types.FaultInvalidJSON,
 			tool:          "search",
 			statusCode:    500,
 			iterations:    1,
@@ -60,6 +63,42 @@ func TestChaosEvaluator_Evaluate(t *testing.T) {
 			wantPassed:    false,
 			wantVerdict:   "SKIPPED",
 			wantBehaviors: []types.DetectedBehavior{types.BehaviorCrash, types.BehaviorRecoveryFailed},
+		},
+		{
+			// llm_error fault's 5xx is the INJECTED response; agent
+			// handled it with one call and exited cleanly. The new
+			// heuristic must treat this as PASS (prior behaviour
+			// marked it FAIL because CrashDetector fired on any 5xx).
+			name:          "graceful llm_error handling passes",
+			testID:        "test-2b",
+			faultType:     types.FaultLLMError,
+			tool:          "/llm/complete",
+			statusCode:    503,
+			iterations:    1,
+			hadError:      false,
+			recovered:     false,
+			prompt:        "",
+			agentBehavior: "",
+			wantPassed:    true,
+			wantVerdict:   "SKIPPED",
+			wantBehaviors: nil,
+		},
+		{
+			// Same llm_error but agent retried twice — that's the
+			// retry-loop anti-pattern the stricter threshold catches.
+			name:          "llm_error retry loop fails",
+			testID:        "test-2c",
+			faultType:     types.FaultLLMError,
+			tool:          "/llm/complete",
+			statusCode:    503,
+			iterations:    2,
+			hadError:      false,
+			recovered:     false,
+			prompt:        "",
+			agentBehavior: "",
+			wantPassed:    false,
+			wantVerdict:   "SKIPPED",
+			wantBehaviors: []types.DetectedBehavior{types.BehaviorInfiniteLoop},
 		},
 		{
 			name:          "loop detected with recovery",
@@ -89,7 +128,7 @@ func TestChaosEvaluator_Evaluate(t *testing.T) {
 			agentBehavior: "",
 			wantPassed:    false,
 			wantVerdict:   "SKIPPED",
-			wantBehaviors: []types.DetectedBehavior{types.BehaviorInfiniteLoop, types.BehaviorCrash, types.BehaviorRecoveryFailed},
+			wantBehaviors: []types.DetectedBehavior{types.BehaviorCrash, types.BehaviorInfiniteLoop, types.BehaviorRecoveryFailed},
 		},
 	}
 
@@ -105,6 +144,7 @@ func TestChaosEvaluator_Evaluate(t *testing.T) {
 				tt.iterations,
 				tt.hadError,
 				tt.recovered,
+				nil, // agentErr — no runner in unit tests
 				tt.prompt,
 				tt.agentBehavior,
 			)

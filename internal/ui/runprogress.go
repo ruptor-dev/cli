@@ -1,5 +1,5 @@
 // Package ui — runprogress.go: the live Bubbletea program shown during
-// `ruptor run`. Layout per SKILL-ui.md: header box, experiment list,
+// `ruptor run`. Layout per docs/specs/ui.md: header box, experiment list,
 // robustness score progress bar, keyboard shortcut hint.
 //
 // The model refreshes every tickInterval by pulling a snapshot from the
@@ -69,15 +69,35 @@ type runModel struct {
 	aborted  bool
 }
 
+// Program wraps the Bubbletea program so callers outside the ui
+// package do not import bubbletea directly. Thin forwarder: Run blocks
+// until the user quits or the snapshot returns Done=true; Send and
+// Quit are goroutine-safe passthroughs.
+type Program struct {
+	prog *tea.Program
+}
+
 // NewRunProgress builds a Bubbletea program for the live run view.
-// Caller invokes Run() to block until the user quits or the snapshot
-// returns Done=true. The View uses the alternate screen buffer so
-// proxy and runner log output (which writes to stderr) does not
-// interleave with TUI repaints; the terminal restores the primary
-// buffer on exit.
-func NewRunProgress(ctx RunContext) *tea.Program {
+func NewRunProgress(ctx RunContext) *Program {
 	m := runModel{ctx: ctx}
-	return tea.NewProgram(m)
+	return &Program{prog: tea.NewProgram(m)}
+}
+
+// Run blocks and returns the final model.
+func (p *Program) Run() (tea.Model, error) {
+	return p.prog.Run()
+}
+
+// Send delivers a message to the program's Update loop. Safe from
+// any goroutine. Used to force a snapshot refresh from the
+// orchestrator after the last experiment completes.
+func (p *Program) Send(msg tea.Msg) {
+	p.prog.Send(msg)
+}
+
+// Quit asks the program to exit. Safe from any goroutine.
+func (p *Program) Quit() {
+	p.prog.Quit()
 }
 
 // Aborted reports whether the final model exited because the user
@@ -90,6 +110,13 @@ func Aborted(finalModel tea.Model) bool {
 }
 
 type tickMsg time.Time
+type finalTickMsg time.Time
+
+// ForceSnapshotMsg asks the program to take a snapshot on the current
+// goroutine instead of waiting for the next tick. Callers send it via
+// prog.Send when they need to flush a state change into the view
+// before ctx is cancelled.
+type ForceSnapshotMsg struct{}
 
 func tick() tea.Cmd {
 	return tea.Tick(tickInterval, func(t time.Time) tea.Msg { return tickMsg(t) })
@@ -105,6 +132,14 @@ func (m runModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleKey(msg)
 	case tickMsg:
 		return m.handleTick()
+	case ForceSnapshotMsg:
+		if m.ctx.Snapshot != nil {
+			m.snap = m.ctx.Snapshot()
+		}
+		return m, nil
+	case finalTickMsg:
+		m.quitting = true
+		return m, tea.Quit
 	}
 	return m, nil
 }
@@ -124,14 +159,20 @@ func (m runModel) handleTick() (tea.Model, tea.Cmd) {
 		m.snap = m.ctx.Snapshot()
 	}
 	if m.snap.Done {
-		m.quitting = true
-		return m, tea.Quit
+		// Render the terminal state (X/X → %) once, then quit on the
+		// next tick. Calling tea.Quit here would kill the render
+		// loop before View() could produce the final frame.
+		return m, tea.Tick(tickInterval, func(t time.Time) tea.Msg { return finalTickMsg(t) })
 	}
 	return m, tick()
 }
 
 func (m runModel) View() tea.View {
-	if m.quitting {
+	// On user abort, blank the TUI and let completion (or lack
+	// thereof) take over. On natural completion, keep rendering the
+	// final frame so the user sees the terminal X/X + % snapshot
+	// before the completion summary prints below it.
+	if m.quitting && m.aborted {
 		return tea.NewView("")
 	}
 	var b strings.Builder
@@ -144,9 +185,7 @@ func (m runModel) View() tea.View {
 	b.WriteString(m.renderScore())
 	b.WriteString("\n\n")
 	b.WriteString(m.renderFooter())
-	v := tea.NewView(b.String())
-	v.AltScreen = true
-	return v
+	return tea.NewView(b.String())
 }
 
 func (m runModel) renderHeader() string {
@@ -255,6 +294,17 @@ func countDone(exps []ExperimentState) int {
 func (m runModel) renderScore() string {
 	label := styleInfo.Render("Robustness ")
 	bar := ProgressBar(m.snap.ScorePercent, 20)
+	total := len(m.snap.Experiments)
+	done := countDone(m.snap.Experiments)
+	if total > 0 && done < total {
+		// Mid-run: a percentage derived from a partial tally is
+		// misleading. Show progress as X/Y instead, reserving the
+		// percentage for the final frame.
+		progress := lipgloss.NewStyle().
+			Foreground(Theme.Muted).
+			Render(fmt.Sprintf(" %d/%d complete", done, total))
+		return "  " + label + bar + progress
+	}
 	pct := lipgloss.NewStyle().
 		Foreground(scoreColor(m.snap.ScorePercent)).
 		Bold(true).

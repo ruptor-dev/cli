@@ -10,37 +10,33 @@ import (
 	"github.com/ruptor-dev/cli/pkg/types"
 )
 
-// ChaosEvaluator evaluates agent behavior during chaos testing using
-// rule-based detectors and an optional LLM judge.
+// ChaosEvaluator classifies one experiment and overlays an LLM judge
+// verdict on top. The rule-based classification itself lives in
+// internal/evaluator/rules/classify.go so the TUI can call it without
+// pulling in judge / network code.
 type ChaosEvaluator struct {
-	judge     llmjudge.Judge
-	detectors []rules.Detector
-	logger    zerolog.Logger
+	judge         llmjudge.Judge
+	maxIterations int
+	logger        zerolog.Logger
 }
 
-// NewChaosEvaluator creates a new ChaosEvaluator with the given judge and
-// configuration. The default detector set (loop, crash, recovery) is
-// installed; use NewChaosEvaluatorWithDetectors to supply a custom set.
+// NewChaosEvaluator creates a new ChaosEvaluator with the given judge
+// and a per-experiment iteration cap (passed through to the
+// ClassifyExperiment loop-detector rule).
 func NewChaosEvaluator(judge llmjudge.Judge, maxIterations int, logger zerolog.Logger) *ChaosEvaluator {
-	return NewChaosEvaluatorWithDetectors(judge, logger, []rules.Detector{
-		&rules.LoopDetector{MaxIterations: maxIterations},
-		&rules.CrashDetector{},
-		&rules.RecoveryDetector{},
-	})
-}
-
-// NewChaosEvaluatorWithDetectors creates a ChaosEvaluator with an explicit
-// detector set. Useful for tests and for callers that want to add custom
-// detectors (e.g. repetition, tone).
-func NewChaosEvaluatorWithDetectors(judge llmjudge.Judge, logger zerolog.Logger, detectors []rules.Detector) *ChaosEvaluator {
 	return &ChaosEvaluator{
-		judge:     judge,
-		detectors: detectors,
-		logger:    logger,
+		judge:         judge,
+		maxIterations: maxIterations,
+		logger:        logger,
 	}
 }
 
-// Evaluate runs all detectors and the LLM judge, assembling a TestResult.
+// Evaluate classifies one experiment by delegating to
+// rules.ClassifyExperiment (the single source of truth for
+// TUI + final report) and overlaying the LLM judge verdict on top.
+//
+// agentErr is the exit error from the agent child process (nil if
+// the runner was not used or the agent exited cleanly).
 func (e *ChaosEvaluator) Evaluate(
 	ctx context.Context,
 	testID string,
@@ -49,6 +45,7 @@ func (e *ChaosEvaluator) Evaluate(
 	statusCode int,
 	iterations int,
 	hadError, recovered bool,
+	agentErr error,
 	prompt, agentBehavior string,
 ) (*types.TestResult, error) {
 	e.logger.Info().
@@ -57,49 +54,47 @@ func (e *ChaosEvaluator) Evaluate(
 		Str("tool", tool).
 		Msg("evaluating chaos test")
 
-	behaviors := e.runDetectors(iterations, statusCode, hadError, recovered)
+	v := rules.ClassifyExperiment(faultType, e.maxIterations, rules.Obs{
+		Hits:           iterations,
+		LastStatusCode: statusCode,
+		HadError:       hadError,
+		Recovered:      recovered,
+	}, agentErr)
 
 	verdict, reason, err := e.runJudge(ctx, prompt, agentBehavior)
 	if err != nil {
 		return nil, err
 	}
 
-	passed := !containsCrash(behaviors) && (verdict == "PASS" || verdict == "SKIPPED")
+	// LLM judge can only downgrade: if the rule engine said PASS and
+	// the judge returned FAIL, the experiment fails. The judge cannot
+	// promote a rule-based fail to a pass.
+	passed := v.Passed && (verdict == "PASS" || verdict == "SKIPPED")
+
+	errStr := ""
+	if !passed && v.Reason != "" {
+		errStr = v.Reason
+	}
 
 	result := &types.TestResult{
 		TestID:            testID,
 		FaultType:         faultType,
 		Tool:              tool,
 		Passed:            passed,
-		DetectedBehaviors: behaviors,
+		DetectedBehaviors: v.Behaviors,
 		LLMJudgeVerdict:   verdict,
 		LLMJudgeReason:    reason,
+		Error:             errStr,
 	}
 
 	e.logger.Info().
 		Str("test_id", testID).
 		Bool("passed", passed).
 		Str("verdict", verdict).
-		Int("behaviors", len(behaviors)).
+		Int("behaviors", len(v.Behaviors)).
 		Msg("chaos evaluation complete")
 
 	return result, nil
-}
-
-func (e *ChaosEvaluator) runDetectors(iterations, statusCode int, hadError, recovered bool) []types.DetectedBehavior {
-	input := rules.DetectionInput{
-		Iterations: iterations,
-		StatusCode: statusCode,
-		HadError:   hadError,
-		Recovered:  recovered,
-	}
-	var behaviors []types.DetectedBehavior
-	for _, d := range e.detectors {
-		if b := d.Detect(input); b != nil {
-			behaviors = append(behaviors, b...)
-		}
-	}
-	return behaviors
 }
 
 func (e *ChaosEvaluator) runJudge(ctx context.Context, prompt, agentBehavior string) (verdict, reason string, err error) {
@@ -111,15 +106,6 @@ func (e *ChaosEvaluator) runJudge(ctx context.Context, prompt, agentBehavior str
 		return "", "", fmt.Errorf("evaluator: running LLM judge: %w", err)
 	}
 	return v, r, nil
-}
-
-func containsCrash(behaviors []types.DetectedBehavior) bool {
-	for _, b := range behaviors {
-		if b == types.BehaviorCrash {
-			return true
-		}
-	}
-	return false
 }
 
 // SimulateEvaluator evaluates conversation simulations using an LLM judge.

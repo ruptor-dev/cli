@@ -19,43 +19,38 @@ type CompletionSummary struct {
 	// screen so users can find the forensics artefacts after a run.
 	// Empty when no runner was used.
 	AgentLogDir string
+	// LogPath is the structured ruptor.log written during the run.
+	// zerolog is redirected there while the TUI owns the terminal so
+	// events do not corrupt the live render. Shown after TUI exit so
+	// users know where to look for proxy/orchestrator log events.
+	LogPath string
 }
 
-// RenderCompletion builds the boxed completion screen from SKILL-ui.md.
+// RenderCompletion builds the boxed completion screen from docs/specs/ui.md.
 // Returned as a string so the caller decides where to write it (test or
 // real stdout).
+// RenderCompletion produces the three-line post-run summary:
+//
+//	✓ Score: X% (P passed · F failed)
+//	✓ Report → <path>
+//	▸ Run log → <path>
+//
+// Kept intentionally terse. The HTML report is the source of truth
+// for per-experiment details (behaviors, durations, judge output).
 func RenderCompletion(s CompletionSummary) string {
-	bar := ProgressBar(s.ScorePercent, 28)
-	pct := lipgloss.NewStyle().
-		Foreground(scoreColor(s.ScorePercent)).
-		Bold(true).
-		Render(fmt.Sprintf(" %d%%", s.ScorePercent))
-
-	summary := fmt.Sprintf("%d passed  •  %d failed  •  %d error", s.Passed, s.Failed, s.Errored)
-
-	var inner strings.Builder
-	inner.WriteString("\n")
-	inner.WriteString("  " + stylePrimary.Render("Robustness Score"))
-	inner.WriteString("\n\n")
-	inner.WriteString("  " + bar + pct)
-	inner.WriteString("\n\n")
-	inner.WriteString("  " + styleInfo.Render(summary))
-	inner.WriteString("\n")
-
-	box := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(Theme.Border).
-		Width(48).
-		Render(inner.String())
+	scoreStyle := lipgloss.NewStyle().Foreground(scoreColor(s.ScorePercent)).Bold(true)
 
 	var b strings.Builder
-	b.WriteString(box)
-	b.WriteString("\n\n")
+	b.WriteString("\n")
+	b.WriteString("  " + styleSuccess.Render("✓ ") + styleInfo.Render("Score: "))
+	b.WriteString(scoreStyle.Render(fmt.Sprintf("%d%%", s.ScorePercent)))
+	b.WriteString(styleMuted.Render(fmt.Sprintf("  (%d passed · %d failed)", s.Passed, s.Failed)))
+	b.WriteString("\n")
 	for _, p := range s.ReportPaths {
-		b.WriteString("  " + styleSuccess.Render("✓ Report saved  →  ") + styleInfo.Render(p) + "\n")
+		b.WriteString("  " + styleSuccess.Render("✓ ") + styleInfo.Render("Report  → ") + styleInfo.Render(p) + "\n")
 	}
-	if s.AgentLogDir != "" {
-		b.WriteString("  " + styleInfo.Render("• Agent logs    →  ") + styleInfo.Render(s.AgentLogDir) + "\n")
+	if s.LogPath != "" {
+		b.WriteString("  " + styleInfo.Render("▸ ") + styleInfo.Render("Run log → ") + styleInfo.Render(s.LogPath) + "\n")
 	}
 	return b.String()
 }

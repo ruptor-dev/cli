@@ -8,19 +8,13 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 	"github.com/ruptor-dev/cli/pkg/types"
 )
 
 // HTMLRenderer renders reports as HTML files using Go templates.
-//
-// Logger is the structured logger used for non-fatal diagnostics such as
-// a missing embedded template fallback. Callers should inject the
-// process-wide logger (see cmd/ruptor main); the zero value is a
-// disabled logger, matching the rest of the internal/ packages.
 type HTMLRenderer struct {
-	Path   string
-	Logger zerolog.Logger
+	Path string
 }
 
 //go:embed templates/chaos_report.html.tmpl templates/simulate_report.html.tmpl
@@ -94,7 +88,7 @@ var templateFuncs = template.FuncMap{
 		if len(r.DetectedBehaviors) > 0 {
 			parts := make([]string, 0, len(r.DetectedBehaviors))
 			for _, b := range r.DetectedBehaviors {
-				parts = append(parts, humanizeBehavior(b))
+				parts = append(parts, b.Human())
 			}
 			return strings.Join(parts, " · ")
 		}
@@ -116,35 +110,10 @@ func (h *HTMLRenderer) loadTemplate(onDiskPath, embeddedPath string) (*template.
 
 	data, err := embeddedTemplates.ReadFile(embeddedPath)
 	if err != nil {
-		h.Logger.Error().Err(err).Str("embedded", embeddedPath).Msg("report: embedded template missing")
+		log.Error().Err(err).Str("embedded", embeddedPath).Msg("report: embedded template missing")
 		return nil, err
 	}
 	return t.Parse(string(data))
-}
-
-// humanizeBehavior turns the evaluator's machine-readable codes into
-// short reviewer-friendly phrases suitable for the FAIL row reason
-// line in the HTML report. Kept alongside the template funcs so the
-// mapping lives in the one place the report renders from.
-func humanizeBehavior(b types.DetectedBehavior) string {
-	switch b {
-	case types.BehaviorCrash:
-		return "agent errored on the injected response"
-	case types.BehaviorRecoveryFailed:
-		return "no retry or fallback path"
-	case types.BehaviorRecoverySuccess:
-		return "agent recovered"
-	case types.BehaviorInfiniteLoop:
-		return "stuck in a retry loop"
-	case types.BehaviorHallucination:
-		return "hallucinated a result instead of surfacing the failure"
-	case types.BehaviorFallbackUsed:
-		return "used a fallback path"
-	case types.BehaviorTimeout:
-		return "agent timed out before the fault was released"
-	default:
-		return string(b)
-	}
 }
 
 func (h *HTMLRenderer) writeHTML(filename string, tmpl *template.Template, data any) error {

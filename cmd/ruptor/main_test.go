@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/ruptor-dev/cli/internal/config"
@@ -55,15 +56,14 @@ func TestReportPathsFor(t *testing.T) {
 	}
 }
 
-// warning (mcpUnscoredWarning) reaches ui.ErrWriter() when proxy.mode
-// is ProxyModeMCP or ProxyModeAuto — the two modes that can route
-// traffic through the MCP handler. HTTP-only runs must stay silent so
-// the copy does not apply to users who are unaffected by the observation
-// gap. The warning is live until
+// TestWarnIfMCPModeUnscored_FiresForMCPAndAuto asserts the runtime
+// warning (mcpUnscoredWarning) reaches ui.Writer() when proxy.mode is
+// ProxyModeMCP or ProxyModeAuto — the two modes that can route traffic
+// through the MCP handler. HTTP-only runs must stay silent so the copy
+// does not apply to users who are unaffected by the observation gap.
+// The warning is live until
 // docs/specs/backlog/mcp-observations-evaluator.md lands; it is NOT a
-// debug artifact. Warnings are routed to stderr so `ruptor run ... | jq`
-// keeps stdout clean; the capture therefore goes through ui.SetErrWriter,
-// not ui.SetWriter.
+// debug artifact.
 //
 // Case-variant inputs ("MCP", " mcp ") are intentionally NOT covered
 // here — they are rejected at config load by chaos_config.Validate(),
@@ -83,9 +83,9 @@ func TestWarnIfMCPModeUnscored_FiresForMCPAndAuto(t *testing.T) {
 	for _, tc := range cases {
 		t.Run("mode="+string(tc.mode), func(t *testing.T) {
 			var buf bytes.Buffer
-			prev := ui.ErrWriter()
-			ui.SetErrWriter(&buf)
-			defer ui.SetErrWriter(prev)
+			prev := ui.Writer()
+			ui.SetWriter(&buf)
+			defer ui.SetWriter(prev)
 
 			warnIfMCPModeUnscored(&config.ChaosConfig{
 				Proxy: config.ProxyConfig{Mode: tc.mode},
@@ -98,7 +98,7 @@ func TestWarnIfMCPModeUnscored_FiresForMCPAndAuto(t *testing.T) {
 				assert.Contains(t, got, "Robustness",
 					"%s: warning must explain the scoring impact", tc.comment)
 			} else {
-				assert.Empty(t, got, "%s: writer must receive nothing", tc.comment)
+				assert.Empty(t, strings.TrimSpace(got), "%s: writer must receive nothing", tc.comment)
 			}
 		})
 	}

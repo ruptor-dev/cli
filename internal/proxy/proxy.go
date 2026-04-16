@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httputil"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/ruptor-dev/cli/internal/config"
 	"github.com/ruptor-dev/cli/internal/proxy/faults"
+	"github.com/ruptor-dev/cli/internal/proxy/mcp"
 )
 
 const (
@@ -59,10 +61,14 @@ type Proxy struct {
 	timeout  time.Duration
 	rng      *rand.Rand
 
-	mu       sync.Mutex
-	listener net.Listener
-	rp       *httputil.ReverseProxy
-	obs      map[string]*Observation
+	mu         sync.Mutex
+	listener   net.Listener
+	rp         *httputil.ReverseProxy
+	obs        map[string]*Observation
+	activeTest string
+
+	// mcpHandler is non-nil when mode is "mcp" or "auto".
+	mcpHandler *mcp.Handler
 }
 
 // NewProxy constructs a Proxy with the given configuration, test cases,
@@ -79,6 +85,14 @@ func NewProxy(cfg *config.ProxyConfig, tests []config.TestConfig, registry *faul
 
 	for _, opt := range opts {
 		opt(p)
+	}
+
+	// Initialise MCP handler for "mcp" or "auto" modes.
+	mode := strings.ToLower(string(cfg.Mode))
+	if mode == "mcp" || mode == "auto" {
+		if target, err := url.Parse(cfg.PassthroughURL); err == nil {
+			p.mcpHandler = mcp.NewHandler(target, tests, registry, p.logger, rand.New(rand.NewSource(time.Now().UnixNano())))
+		}
 	}
 
 	p.server = &http.Server{
