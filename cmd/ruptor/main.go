@@ -160,6 +160,12 @@ func runChaos(ctx context.Context, cfgPath, outputPath, testFilter string, cloud
 
 	durations := newDurationTracker()
 	runStart := time.Now()
+
+	// Warn once per run when MCP mode could plausibly be exercised.
+	// Faults still fire on the wire, but MCP observations are not yet
+	// wired to the evaluator — see docs/specs/backlog/mcp-observations-evaluator.md.
+	warnIfMCPModeUnscored(cfg)
+
 	orchErrCh := make(chan error, 1)
 	go func() {
 		orchErrCh <- orchestrateExperiments(ctx, stop, cfg, tests, p, runDir, durations, logger)
@@ -693,6 +699,31 @@ func newVersionCmd() *cobra.Command {
 // ---------------------------------------------------------------------------
 // helpers
 // ---------------------------------------------------------------------------
+
+// mcpUnscoredWarning is surfaced once per run whenever proxy mode is
+// "mcp" or "auto" — i.e. whenever MCP traffic could plausibly be
+// exercised during this run. MCP observations are not yet wired into
+// the evaluator (see docs/specs/backlog/mcp-observations-evaluator.md),
+// so the Robustness Score and per-test hits will read zero for MCP
+// tests even though the faults fire correctly on the wire. The
+// warning stays live until that spec lands.
+const mcpUnscoredWarning = "MCP observation wiring is not yet in the evaluator (see " +
+	"docs/specs/backlog/mcp-observations-evaluator.md). Faults will " +
+	"fire correctly on the wire, but per-test hits and Robustness " +
+	"Score will report zero for MCP tests until this lands."
+
+// warnIfMCPModeUnscored emits mcpUnscoredWarning once per run when the
+// config's proxy.mode could cause MCP traffic to flow through the
+// handler (either explicit "mcp" or "auto" which may pick MCP at
+// runtime). Pure HTTP runs are silent. Called at the top of the run
+// orchestration — not during config load — so `ruptor validate` and
+// similar one-off checks do not pollute the terminal.
+func warnIfMCPModeUnscored(cfg *config.ChaosConfig) {
+	mode := strings.ToLower(strings.TrimSpace(cfg.Proxy.Mode))
+	if mode == "mcp" || mode == "auto" {
+		ui.Warning(mcpUnscoredWarning)
+	}
+}
 
 func buildJudge(useLLM bool, logger zerolog.Logger) (llmjudge.Judge, error) {
 	if !useLLM {

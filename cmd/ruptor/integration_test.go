@@ -255,6 +255,104 @@ output:
 	assert.NotNil(t, proc)
 }
 
+// mcpUnscoredWarningSnippet is a stable substring of the runtime
+// warning surfaced when proxy.mode is "mcp" or "auto". Kept narrow on
+// purpose — asserting the full wording would couple the test to
+// copyediting, whereas the backlog spec path is the stable anchor
+// the warning exists to advertise.
+const mcpUnscoredWarningSnippet = "docs/specs/backlog/mcp-observations-evaluator.md"
+
+// chaosConfigWithMode writes a minimal chaos.yaml whose agent is a
+// shell snippet that simply sleeps long enough for the orchestrator
+// to reach the warning site, then returns. We do not care about
+// report contents — only whether the warning fires on stdout.
+func chaosConfigWithMode(t *testing.T, mode string, port int) string {
+	t.Helper()
+	cfg := fmt.Sprintf(`version: "1"
+agent:
+  name: mcp_warning_test_agent
+  entrypoint: sh -c "sleep 1"
+  mode: oneshot
+proxy:
+  port: %d
+  passthrough_url: http://127.0.0.1:1
+  request_timeout_s: 5
+  mode: %s
+tests:
+  - id: noop
+    tool: /noop
+    fault: tool_timeout
+    delay_ms: 10
+    probability: 1.0
+evaluation:
+  max_iterations: 1
+  timeout_s: 2
+  llm_judge: false
+output:
+  format: stdout
+`, port, mode)
+	cfgPath := filepath.Join(t.TempDir(), "chaos.yaml")
+	require.NoError(t, os.WriteFile(cfgPath, []byte(cfg), 0o600))
+	return cfgPath
+}
+
+// freePort returns a TCP port the OS advertised as free. Best-effort —
+// the port may be reclaimed before the binary under test binds it,
+// but for localhost integration tests the race is vanishingly rare.
+func freePort(t *testing.T) int {
+	t.Helper()
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	port := l.Addr().(*net.TCPAddr).Port
+	require.NoError(t, l.Close())
+	return port
+}
+
+func TestRun_WarnsWhenProxyModeIsMCP(t *testing.T) {
+	// Contract: proxy.mode=mcp must surface the unscored-evaluator
+	// warning exactly once per run, before the experiment starts.
+	// Faults still fire on the wire; only the score wiring is missing.
+	// See docs/specs/backlog/mcp-observations-evaluator.md.
+	cfgPath := chaosConfigWithMode(t, "mcp", freePort(t))
+	out, code := runRuptor(t, "run", cfgPath)
+	assert.Equal(t, 0, code, "mcp-mode run must exit 0\n%s", out)
+	assert.Contains(t, out, mcpUnscoredWarningSnippet,
+		"mcp mode must surface the unscored-evaluator warning")
+	// The warning must be emitted at most once per run — if the helper
+	// is accidentally placed inside the per-test loop a multi-test run
+	// would spam the user. One test case here is enough to flag a
+	// regression because the helper has a single caller.
+	assert.Equal(t, 1, strings.Count(out, mcpUnscoredWarningSnippet),
+		"warning must appear exactly once per run")
+}
+
+func TestRun_WarnsWhenProxyModeIsAuto(t *testing.T) {
+	// "auto" may route individual requests through the MCP handler at
+	// runtime based on payload inspection, so the warning must fire
+	// here too.
+	cfgPath := chaosConfigWithMode(t, "auto", freePort(t))
+	out, code := runRuptor(t, "run", cfgPath)
+	assert.Equal(t, 0, code, "auto-mode run must exit 0\n%s", out)
+	assert.Contains(t, out, mcpUnscoredWarningSnippet,
+		"auto mode must surface the unscored-evaluator warning")
+}
+
+func TestRun_DoesNotWarnWhenProxyModeIsHTTP(t *testing.T) {
+	// Pure HTTP mode is unaffected by the MCP observation gap — the
+	// warning must stay silent so HTTP users do not see copy that
+	// does not apply to them. Covers both the explicit "http" value
+	// and the default empty string (which resolves to HTTP today).
+	for _, mode := range []string{"http", ""} {
+		t.Run("mode="+mode, func(t *testing.T) {
+			cfgPath := chaosConfigWithMode(t, mode, freePort(t))
+			out, code := runRuptor(t, "run", cfgPath)
+			assert.Equal(t, 0, code, "%q-mode run must exit 0\n%s", mode, out)
+			assert.NotContains(t, out, mcpUnscoredWarningSnippet,
+				"%q mode must not surface the MCP-evaluator warning", mode)
+		})
+	}
+}
+
 // repoPath resolves a path relative to the cli/ repo root regardless
 // of the directory the test was invoked from. cmd/ruptor sits two
 // levels deep so we walk up to the parent that contains testdata/.

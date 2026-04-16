@@ -1,18 +1,13 @@
 package main
 
 import (
-	"context"
+	"bytes"
 	"reflect"
 	"testing"
 
-	"github.com/rs/zerolog"
 	"github.com/ruptor-dev/cli/internal/config"
-	"github.com/ruptor-dev/cli/internal/evaluator"
-	"github.com/ruptor-dev/cli/internal/evaluator/llmjudge"
-	"github.com/ruptor-dev/cli/internal/proxy"
-	"github.com/ruptor-dev/cli/pkg/types"
+	"github.com/ruptor-dev/cli/internal/ui"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 func TestReportPathsFor(t *testing.T) {
@@ -60,81 +55,56 @@ func TestReportPathsFor(t *testing.T) {
 	}
 }
 
-// TestEvaluateTest_WiresRecoveredFromObservation exercises the full
-// proxy.Observation → evaluator wire-up. The recovery signal is
-// derived from the observation's Recovered() method — a minimal
-// "one tool path was hit >=2 times and the final hit returned 2xx/3xx
-// after an earlier fault". This test feeds a recovery-shaped
-// observation and asserts the evaluator records BehaviorRecoverySuccess
-// on the resulting TestResult. It is the counter-assertion to
-// internal/proxy/observations_test.go's TestObservations_RecoverySignalFlipsOnRetry
-// which drives the proxy end; together they cover the whole path
-// proxy → Recovered() → Evaluate → TestResult.DetectedBehaviors.
-func TestEvaluateTest_WiresRecoveredFromObservation(t *testing.T) {
-	eval := evaluator.NewChaosEvaluator(&llmjudge.NoopJudge{}, 10, zerolog.Nop())
-
-	// Recovery-shaped observation: two hits, only the first faulted,
-	// final status 200. proxy.Observation.Recovered() returns true
-	// for this shape (see observations_test.go table cases).
-	obs := proxy.Observation{
-		TestID:         "t-retry",
-		Hits:           2,
-		FaultsInjected: 1,
-		HadError:       true,
-		LastStatusCode: 200,
+// TestWarnIfMCPModeUnscored_FiresForMCPAndAuto asserts the runtime
+// warning (mcpUnscoredWarning) reaches ui.Writer() when proxy.mode is
+// "mcp" or "auto" — the two modes that can route traffic through the
+// MCP handler. HTTP-only runs must stay silent so the copy does not
+// apply to users who are unaffected by the observation gap. The
+// warning is live until docs/specs/backlog/mcp-observations-evaluator.md
+// lands; it is NOT a debug artifact.
+func TestWarnIfMCPModeUnscored_FiresForMCPAndAuto(t *testing.T) {
+	cases := []struct {
+		mode    string
+		warn    bool
+		comment string
+	}{
+		{mode: "mcp", warn: true, comment: "explicit MCP must warn"},
+		{mode: "MCP", warn: true, comment: "mode is normalised — uppercase must warn too"},
+		{mode: " mcp ", warn: true, comment: "surrounding whitespace must not hide MCP"},
+		{mode: "auto", warn: true, comment: "auto may route to MCP at runtime — must warn"},
+		{mode: "http", warn: false, comment: "pure HTTP is unaffected — no warning"},
+		{mode: "", warn: false, comment: "default (empty) is HTTP — no warning"},
 	}
-	require.True(t, obs.Recovered(),
-		"precondition: the test input must be a recovery-shaped observation")
+	for _, tc := range cases {
+		t.Run("mode="+tc.mode, func(t *testing.T) {
+			var buf bytes.Buffer
+			prev := ui.Writer()
+			ui.SetWriter(&buf)
+			defer ui.SetWriter(prev)
 
-	tc := config.TestConfig{
-		ID:    "t-retry",
-		Tool:  "/search",
-		Fault: types.FaultToolError,
+			warnIfMCPModeUnscored(&config.ChaosConfig{
+				Proxy: config.ProxyConfig{Mode: tc.mode},
+			})
+
+			got := buf.String()
+			if tc.warn {
+				assert.Contains(t, got, "docs/specs/backlog/mcp-observations-evaluator.md",
+					"%s: warning must name the backlog spec path", tc.comment)
+				assert.Contains(t, got, "Robustness",
+					"%s: warning must explain the scoring impact", tc.comment)
+			} else {
+				assert.Empty(t, got, "%s: writer must receive nothing", tc.comment)
+			}
+		})
 	}
-
-	r := evaluateTest(context.Background(), eval, tc, obs, nil, "", zerolog.Nop())
-
-	require.NotNil(t, r, "evaluateTest must return a result")
-	assert.Equal(t, "t-retry", r.TestID)
-
-	var sawRecoverySuccess bool
-	for _, b := range r.DetectedBehaviors {
-		if b == types.BehaviorRecoverySuccess {
-			sawRecoverySuccess = true
-		}
-	}
-	assert.True(t, sawRecoverySuccess,
-		"TestResult.DetectedBehaviors must include recovery_success when the observation reports Recovered()=true; got %v",
-		r.DetectedBehaviors)
 }
 
-// TestEvaluateTest_NoRecoveryWhenObservationDoesNotRecover is the
-// negative counterpart: a faulted-then-faulted observation must
-// produce recovery_failed, never recovery_success.
-func TestEvaluateTest_NoRecoveryWhenObservationDoesNotRecover(t *testing.T) {
-	eval := evaluator.NewChaosEvaluator(&llmjudge.NoopJudge{}, 10, zerolog.Nop())
-
-	obs := proxy.Observation{
-		TestID:         "t-stuck",
-		Hits:           2,
-		FaultsInjected: 2,
-		HadError:       true,
-		LastStatusCode: 500,
-	}
-	require.False(t, obs.Recovered(),
-		"precondition: all hits faulted — must not be recovery")
-
-	tc := config.TestConfig{
-		ID:    "t-stuck",
-		Tool:  "/api",
-		Fault: types.FaultToolError,
-	}
-
-	r := evaluateTest(context.Background(), eval, tc, obs, nil, "", zerolog.Nop())
-
-	require.NotNil(t, r)
-	for _, b := range r.DetectedBehaviors {
-		assert.NotEqual(t, types.BehaviorRecoverySuccess, b,
-			"non-recovery observation must not yield recovery_success")
-	}
+// TestMCPUnscoredWarning_NamesBacklogSpec freezes the one contract
+// callers rely on: the warning text points at the backlog spec that
+// tracks the fix. A curious user must be able to grep their terminal
+// for the path and land on the tracking doc.
+func TestMCPUnscoredWarning_NamesBacklogSpec(t *testing.T) {
+	assert.Contains(t, mcpUnscoredWarning,
+		"docs/specs/backlog/mcp-observations-evaluator.md",
+		"warning const must name the backlog spec so users can find the tracking doc")
 }

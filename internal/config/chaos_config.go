@@ -44,6 +44,10 @@ type ProxyConfig struct {
 	Port            int    `yaml:"port"`
 	PassthroughURL  string `yaml:"passthrough_url"`
 	RequestTimeoutS int    `yaml:"request_timeout_s"`
+	// Mode selects the proxy protocol: "http" (default), "mcp", or "auto".
+	// "mcp" treats all traffic as MCP JSON-RPC 2.0; "auto" inspects each
+	// request and routes to either the MCP or HTTP handler.
+	Mode string `yaml:"mode"`
 }
 
 // TestConfig describes a single fault injection test case.
@@ -93,6 +97,11 @@ func (c *ChaosConfig) Validate() error {
 
 	if c.Proxy.PassthroughURL == "" {
 		errs = append(errs, errors.New("proxy.passthrough_url is required"))
+	}
+
+	validModes := map[string]bool{"": true, "http": true, "mcp": true, "auto": true}
+	if !validModes[c.Proxy.Mode] {
+		errs = append(errs, fmt.Errorf("proxy.mode must be one of: http, mcp, auto (got %q)", c.Proxy.Mode))
 	}
 
 	for i, t := range c.Tests {
