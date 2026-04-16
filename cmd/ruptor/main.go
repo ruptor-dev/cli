@@ -714,13 +714,18 @@ const mcpUnscoredWarning = "MCP observation wiring is not yet in the evaluator (
 
 // warnIfMCPModeUnscored emits mcpUnscoredWarning once per run when the
 // config's proxy.mode could cause MCP traffic to flow through the
-// handler (either explicit "mcp" or "auto" which may pick MCP at
-// runtime). Pure HTTP runs are silent. Called at the top of the run
-// orchestration — not during config load — so `ruptor validate` and
-// similar one-off checks do not pollute the terminal.
+// handler (either explicit ProxyModeMCP or ProxyModeAuto which may pick
+// MCP at runtime). Pure HTTP runs are silent. Called at the top of the
+// run orchestration — not during config load — so `ruptor validate`
+// and similar one-off checks do not pollute the terminal.
+//
+// Validate() is the single gate that canonicalises cfg.Proxy.Mode, so
+// this helper compares against the typed constants directly. Anything
+// non-canonical (e.g. "MCP", " mcp ") was rejected at load time and
+// cannot reach here.
 func warnIfMCPModeUnscored(cfg *config.ChaosConfig) {
-	mode := strings.ToLower(strings.TrimSpace(cfg.Proxy.Mode))
-	if mode == "mcp" || mode == "auto" {
+	switch cfg.Proxy.Mode {
+	case config.ProxyModeMCP, config.ProxyModeAuto:
 		ui.Warning(mcpUnscoredWarning)
 	}
 }

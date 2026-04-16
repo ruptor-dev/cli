@@ -39,15 +39,36 @@ type AgentConfig struct {
 	Env        map[string]string `yaml:"env"`
 }
 
+// ProxyMode is the canonical, validated proxy protocol mode. Callers
+// MUST compare against the exported ProxyMode* constants — the type
+// exists precisely so the compiler catches stringly-typed drift.
+//
+// YAML/mapstructure decoding still works because ProxyMode's underlying
+// type is string; Validate() is the single gate that converts user
+// input into one of the allowed canonical values (or rejects it).
+type ProxyMode string
+
+const (
+	// ProxyModeHTTP routes all traffic through the HTTP fault handler.
+	// This is the default when proxy.mode is omitted from the config.
+	ProxyModeHTTP ProxyMode = "http"
+	// ProxyModeMCP treats all traffic as MCP JSON-RPC 2.0.
+	ProxyModeMCP ProxyMode = "mcp"
+	// ProxyModeAuto inspects each request and routes to either the MCP
+	// or HTTP handler at runtime based on payload shape.
+	ProxyModeAuto ProxyMode = "auto"
+)
+
 // ProxyConfig describes the fault-injecting proxy.
 type ProxyConfig struct {
 	Port            int    `yaml:"port"`
 	PassthroughURL  string `yaml:"passthrough_url"`
 	RequestTimeoutS int    `yaml:"request_timeout_s"`
-	// Mode selects the proxy protocol: "http" (default), "mcp", or "auto".
-	// "mcp" treats all traffic as MCP JSON-RPC 2.0; "auto" inspects each
-	// request and routes to either the MCP or HTTP handler.
-	Mode string `yaml:"mode"`
+	// Mode selects the proxy protocol. Allowed values are the
+	// ProxyMode* constants, or the empty string, which Validate()
+	// rewrites to ProxyModeHTTP. Validation is case-exact and
+	// whitespace-exact: "MCP" or " mcp " are rejected.
+	Mode ProxyMode `yaml:"mode"`
 }
 
 // TestConfig describes a single fault injection test case.
@@ -77,7 +98,12 @@ type OutputConfig struct {
 	Path   string `yaml:"path"`
 }
 
-// Validate checks all required fields and returns all validation errors joined together.
+// Validate checks all required fields and returns all validation
+// errors joined together. Validate also canonicalises c.Proxy.Mode:
+// an empty value is rewritten in place to ProxyModeHTTP so downstream
+// consumers see exactly one representation of "default". This
+// mutation is the only non-check side effect; a second Validate
+// call on a canonicalised config is idempotent.
 func (c *ChaosConfig) Validate() error {
 	var errs []error
 
@@ -99,9 +125,17 @@ func (c *ChaosConfig) Validate() error {
 		errs = append(errs, errors.New("proxy.passthrough_url is required"))
 	}
 
-	validModes := map[string]bool{"": true, "http": true, "mcp": true, "auto": true}
-	if !validModes[c.Proxy.Mode] {
-		errs = append(errs, fmt.Errorf("proxy.mode must be one of: http, mcp, auto (got %q)", c.Proxy.Mode))
+	// Proxy mode is case-exact and whitespace-exact. The empty string is
+	// rewritten to ProxyModeHTTP so downstream consumers never see a
+	// degenerate "" value — there is exactly one canonical representation
+	// of "default HTTP" post-Validate.
+	switch c.Proxy.Mode {
+	case "":
+		c.Proxy.Mode = ProxyModeHTTP
+	case ProxyModeHTTP, ProxyModeMCP, ProxyModeAuto:
+		// canonical — no rewrite needed
+	default:
+		errs = append(errs, fmt.Errorf(`proxy.mode must be one of "http", "mcp", "auto" (got %q)`, string(c.Proxy.Mode)))
 	}
 
 	for i, t := range c.Tests {

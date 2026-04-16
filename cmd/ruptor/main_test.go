@@ -55,30 +55,33 @@ func TestReportPathsFor(t *testing.T) {
 	}
 }
 
-// TestWarnIfMCPModeUnscored_FiresForMCPAndAuto asserts the runtime
 // warning (mcpUnscoredWarning) reaches ui.ErrWriter() when proxy.mode
-// is "mcp" or "auto" — the two modes that can route traffic through
-// the MCP handler. HTTP-only runs must stay silent so the copy does
-// not apply to users who are unaffected by the observation gap. The
-// warning is live until docs/specs/backlog/mcp-observations-evaluator.md
-// lands; it is NOT a debug artifact. Warnings are routed to stderr so
-// `ruptor run ... | jq` keeps stdout clean; the capture therefore goes
-// through ui.SetErrWriter, not ui.SetWriter.
+// is ProxyModeMCP or ProxyModeAuto — the two modes that can route
+// traffic through the MCP handler. HTTP-only runs must stay silent so
+// the copy does not apply to users who are unaffected by the observation
+// gap. The warning is live until
+// docs/specs/backlog/mcp-observations-evaluator.md lands; it is NOT a
+// debug artifact. Warnings are routed to stderr so `ruptor run ... | jq`
+// keeps stdout clean; the capture therefore goes through ui.SetErrWriter,
+// not ui.SetWriter.
+//
+// Case-variant inputs ("MCP", " mcp ") are intentionally NOT covered
+// here — they are rejected at config load by chaos_config.Validate(),
+// so they never reach this helper in production. See
+// TestChaosValidate_RejectsProxyModeCaseVariants in
+// internal/config/loader_test.go for the contract enforcement.
 func TestWarnIfMCPModeUnscored_FiresForMCPAndAuto(t *testing.T) {
 	cases := []struct {
-		mode    string
+		mode    config.ProxyMode
 		warn    bool
 		comment string
 	}{
-		{mode: "mcp", warn: true, comment: "explicit MCP must warn"},
-		{mode: "MCP", warn: true, comment: "mode is normalised — uppercase must warn too"},
-		{mode: " mcp ", warn: true, comment: "surrounding whitespace must not hide MCP"},
-		{mode: "auto", warn: true, comment: "auto may route to MCP at runtime — must warn"},
-		{mode: "http", warn: false, comment: "pure HTTP is unaffected — no warning"},
-		{mode: "", warn: false, comment: "default (empty) is HTTP — no warning"},
+		{mode: config.ProxyModeMCP, warn: true, comment: "explicit MCP must warn"},
+		{mode: config.ProxyModeAuto, warn: true, comment: "auto may route to MCP at runtime — must warn"},
+		{mode: config.ProxyModeHTTP, warn: false, comment: "pure HTTP is unaffected — no warning"},
 	}
 	for _, tc := range cases {
-		t.Run("mode="+tc.mode, func(t *testing.T) {
+		t.Run("mode="+string(tc.mode), func(t *testing.T) {
 			var buf bytes.Buffer
 			prev := ui.ErrWriter()
 			ui.SetErrWriter(&buf)

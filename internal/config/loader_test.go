@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -525,6 +526,84 @@ func TestChaosValidate_MultipleErrors(t *testing.T) {
 	assert.Contains(t, msg, "tests[0].id is required")
 	assert.Contains(t, msg, "tests[0].probability must be between 0 and 1")
 	assert.Contains(t, msg, "output.format must be one of")
+}
+
+// TestChaosValidate_RejectsProxyModeCaseVariants locks the strict
+// contract: proxy.mode is case-exact and whitespace-exact. A typo like
+// "MCP" or " mcp " is a config error that deserves a crisp failure at
+// load, not silent acceptance. Downstream consumers (warnIfMCPModeUnscored,
+// proxy dispatch) therefore compare against the typed ProxyMode*
+// constants directly — no ToLower/TrimSpace — because Validate is the
+// single gate that canonicalises input.
+func TestChaosValidate_RejectsProxyModeCaseVariants(t *testing.T) {
+	rejected := []ProxyMode{
+		ProxyMode("MCP"),
+		ProxyMode(" mcp "),
+		ProxyMode("Mcp"),
+		ProxyMode("HTTP"),
+		ProxyMode("Auto"),
+		ProxyMode("mcp\n"),
+	}
+	for _, mode := range rejected {
+		t.Run(fmt.Sprintf("mode=%q", string(mode)), func(t *testing.T) {
+			cfg := &ChaosConfig{
+				Version: SchemaVersion,
+				Agent:   AgentConfig{Name: "test"},
+				Proxy: ProxyConfig{
+					Port:           8080,
+					PassthroughURL: "https://example.com",
+					Mode:           mode,
+				},
+				Output: OutputConfig{Format: "json"},
+			}
+			err := cfg.Validate()
+			require.Error(t, err, "mode=%q must be rejected", string(mode))
+			assert.Contains(t, err.Error(),
+				`proxy.mode must be one of "http", "mcp", "auto"`,
+				"error must list the canonical allowed values")
+		})
+	}
+}
+
+// TestChaosValidate_NormalizesEmptyProxyModeToHTTP pins the write-through
+// behaviour: an omitted proxy.mode is rewritten in place to ProxyModeHTTP.
+// Downstream code can rely on never seeing an empty string, removing the
+// "is empty still HTTP?" check at every consumer.
+func TestChaosValidate_NormalizesEmptyProxyModeToHTTP(t *testing.T) {
+	cfg := &ChaosConfig{
+		Version: SchemaVersion,
+		Agent:   AgentConfig{Name: "test"},
+		Proxy: ProxyConfig{
+			Port:           8080,
+			PassthroughURL: "https://example.com",
+			Mode:           "",
+		},
+		Output: OutputConfig{Format: "json"},
+	}
+	require.NoError(t, cfg.Validate())
+	assert.Equal(t, ProxyModeHTTP, cfg.Proxy.Mode,
+		"empty proxy.mode must be rewritten to ProxyModeHTTP so consumers see exactly one canonical default")
+}
+
+// TestChaosValidate_AcceptsCanonicalProxyModes asserts the three valid
+// typed values survive Validate unchanged.
+func TestChaosValidate_AcceptsCanonicalProxyModes(t *testing.T) {
+	for _, mode := range []ProxyMode{ProxyModeHTTP, ProxyModeMCP, ProxyModeAuto} {
+		t.Run("mode="+string(mode), func(t *testing.T) {
+			cfg := &ChaosConfig{
+				Version: SchemaVersion,
+				Agent:   AgentConfig{Name: "test"},
+				Proxy: ProxyConfig{
+					Port:           8080,
+					PassthroughURL: "https://example.com",
+					Mode:           mode,
+				},
+				Output: OutputConfig{Format: "json"},
+			}
+			require.NoError(t, cfg.Validate())
+			assert.Equal(t, mode, cfg.Proxy.Mode, "canonical mode must not be rewritten")
+		})
+	}
 }
 
 func TestSimulateValidate_MultipleErrors(t *testing.T) {
