@@ -107,7 +107,7 @@ func newRunCmd() *cobra.Command {
 	cmd.Flags().StringVar(&outputPath, "output", "", "output file path for the report")
 	cmd.Flags().StringVar(&testFilter, "test", "", "run only the test with this ID")
 	cmd.Flags().BoolVar(&cloudFlag, "cloud", false, "spool report to ~/.ruptor/pending/ for upload by `ruptor sync`")
-	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "tee runner/proxy logs to stderr alongside <runDir>/ruptor.log (may interleave with the TUI)")
+	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "stream runner/proxy logs to stderr (disables the TUI; logs still land in <runDir>/ruptor.log)")
 
 	return cmd
 }
@@ -197,8 +197,13 @@ func runChaos(ctx context.Context, cfgPath, outputPath, testFilter string, cloud
 	// orchestrator can send it ForceSnapshotMsg + a 50ms render
 	// grace right after the last durations.set, guaranteeing the
 	// "4/4 → final %" frame lands before ctx cancels.
+	// Verbose disables the TUI: the live render repaints every tick
+	// via cursor-up + overwrite, so any stderr write between ticks is
+	// erased on the next paint. If the operator wants to watch the
+	// log stream, the TUI is in their way — skip it and let the
+	// orchestrator run with logs flowing to stderr.
 	var prog *ui.Program
-	if ui.IsInteractive() {
+	if ui.IsInteractive() && !verbose {
 		boundPort := waitAndReadBoundPort(ctx, p, 10*time.Second)
 		if boundPort == 0 {
 			boundPort = cfg.Proxy.Port
