@@ -63,8 +63,8 @@ export TOOL_BASE_URL="http://localhost:8080"
 # Chaos: ruptor's own runner launches agent.py (mode: persistent) and
 # stops it at the end — no manual &-launch here, the runner owns the
 # lifecycle.
-echo "▸ $RUPTOR run chaos.yaml"
-"$RUPTOR" run chaos.yaml
+echo "▸ $RUPTOR run chaos.yaml $*"
+"$RUPTOR" run chaos.yaml "$@"
 
 # Simulate: ruptor does not yet launch the entrypoint for simulate
 # mode, so we spin up agent.py manually for this phase and take it

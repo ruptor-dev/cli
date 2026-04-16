@@ -52,5 +52,5 @@ done
 
 export TOOL_BASE_URL="http://localhost:8080"
 
-echo "▸ running $RUPTOR run chaos.yaml"
-"$RUPTOR" run chaos.yaml
+echo "▸ running $RUPTOR run chaos.yaml $*"
+"$RUPTOR" run chaos.yaml "$@"
