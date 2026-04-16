@@ -24,7 +24,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 	if p.shouldInject(test.Probability) {
 		p.injectFault(rec, r, test)
-		p.recordFault(test.ID, rec.status)
+		p.RecordFault(test.ID, rec.status)
 		return
 	}
 
@@ -139,7 +139,7 @@ func (p *Proxy) passthrough(w http.ResponseWriter, r *http.Request, testID strin
 
 	if testID != "" {
 		if rec, ok := w.(*statusRecorder); ok {
-			p.recordPassthrough(testID, rec.status)
+			p.RecordPassthrough(testID, rec.status)
 		}
 	}
 }

@@ -1,10 +1,23 @@
 # MCP observations not wired to evaluator
 
-> Status: **Backlog**
+> Status: **Done — 2026-04-16**
 > Opened: 2026-04-15
 > Priority: **ship-critical** (MCP is a v1 feature; must have working scores)
 > Est. effort: **S** (half day)
 > Decision required: **no**
+
+## Shipped
+
+Option B (callback interface). `internal/proxy.ObservationSink` defines the
+two-method contract (`RecordFault`, `RecordPassthrough`); `*proxy.Proxy`
+implements it, and `mcp.NewHandler` takes the sink at construction. The
+duplicate `mcp.Observation` struct, `Handler.Observations()`, and
+`Handler.ResetObservation` have been removed — MCP observations now land
+in the same map the evaluator already consumes via `p.Observations()`.
+
+`RecordFault` now sets `HadError = true` unconditionally (MCP fault
+responses ride on HTTP 200 and carry the error in the JSON-RPC envelope;
+the previous status-code heuristic would have missed them).
 
 ## Problem
 

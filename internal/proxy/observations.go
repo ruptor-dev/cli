@@ -43,8 +43,20 @@ func (p *Proxy) Observations() map[string]Observation {
 	return out
 }
 
-// recordFault updates the observation for a fault-injected request.
-func (p *Proxy) recordFault(testID string, statusCode int) {
+// ObservationSink is the contract for recording per-test proxy
+// observations. Both HTTP and MCP handlers write through it; the Proxy
+// is the sole implementation.
+type ObservationSink interface {
+	RecordFault(testID string, statusCode int)
+	RecordPassthrough(testID string, statusCode int)
+}
+
+// RecordFault updates the observation for a fault-injected request. A
+// call to RecordFault is by definition an error — the proxy fired a
+// fault on the matched test, regardless of whether the transport-level
+// status code reflects it (MCP fault responses use HTTP 200 and carry
+// the error in the JSON-RPC envelope).
+func (p *Proxy) RecordFault(testID string, statusCode int) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -52,17 +64,13 @@ func (p *Proxy) recordFault(testID string, statusCode int) {
 	o.Hits++
 	o.FaultsInjected++
 	o.LastStatusCode = statusCode
-	if statusCode >= 400 || statusCode == 0 {
-		// statusCode == 0 represents "no status written" (e.g. timeout
-		// fault that closes the socket or returns 504 without body).
-		o.HadError = true
-	}
+	o.HadError = true
 }
 
-// recordPassthrough updates the observation for a matched-but-not-fired
+// RecordPassthrough updates the observation for a matched-but-not-fired
 // request that was proxied through. We track only the hit count and
 // status code so the evaluator sees whether the path was exercised.
-func (p *Proxy) recordPassthrough(testID string, statusCode int) {
+func (p *Proxy) RecordPassthrough(testID string, statusCode int) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
