@@ -28,7 +28,11 @@ type Settings struct {
 	// CloudEnabled is true when the --cloud flag is set (runtime only;
 	// never persisted to disk).
 	CloudEnabled bool `mapstructure:"-"`
-	// Deferred to v2 — exporter not wired; env var remains functional for forward compat.
+	// TelemetryEnabled toggles OTel tracing (see ADR-010). When true but
+	// no exporter endpoint is configured, telemetry.Init returns a noop
+	// provider and logs a single Warn line; the flag parses so
+	// RUPTOR_TELEMETRY_ENABLED set in anticipation of an exporter does
+	// not break startup.
 	TelemetryEnabled bool `mapstructure:"telemetry_enabled"`
 	// OutputPath is the default report destination when a command does
 	// not override it with --output.

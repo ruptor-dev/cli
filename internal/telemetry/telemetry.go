@@ -1,23 +1,36 @@
-// Package telemetry holds ruptor's OpenTelemetry tracer plumbing.
+// Package telemetry wires ruptor's opt-in OpenTelemetry tracing.
 //
-// Deferred to v2 (see ADR-010). Init intentionally constructs a
-// TracerProvider with no exporter: the collector endpoint
-// (telemetry.ruptor.dev) does not exist yet, and shipping a live
-// TracerProvider that silently drops spans would lie about what v1
-// does. The package is kept so v2 can plug an OTLP exporter in one
-// place without relocating every span call site.
+// Security rule: telemetry is DISABLED by default. It is enabled only after
+// explicit `ruptor auth login` (user knowingly connects to cloud) or by
+// setting RUPTOR_TELEMETRY_ENABLED=true. The telemetry payload contains
+// ONLY: command name, fault types used, run duration, ruptor version.
+// NEVER: tool response content, agent output, file paths, user data, IP.
 //
-// When the exporter lands, the span payload must stay within the
-// existing allowlist enforced by RecordRun: command name, fault
-// types, run duration, ruptor version. Tool response bodies, agent
-// output, file paths, user data, and IP addresses are not eligible
-// and the function signature is the contract.
+// Init resolves to one of three states (see ADR-010):
+//
+//   - Disabled (cfg.Enabled == false): return a noop provider. Shutdown
+//     is a no-op.
+//   - Enabled without endpoint (cfg.Enabled == true && cfg.Endpoint == ""):
+//     return a noop provider and emit a single Warn log line through the
+//     caller-supplied logger. The flag parses so RUPTOR_TELEMETRY_ENABLED
+//     set in anticipation of an exporter does not break startup; spans
+//     simply do not record until an endpoint is configured.
+//   - Enabled with endpoint (both set): return an SDK TracerProvider
+//     carrying the ruptor resource. Wiring the OTLP exporter onto this
+//     provider is tracked by ADR-010.
+//
+// The span payload must stay within the existing allowlist enforced by
+// RecordRun: command name, fault types, run duration, ruptor version.
+// Tool response bodies, agent output, file paths, user data, and IP
+// addresses are not eligible and the function signature is the contract.
 package telemetry
 
 import (
 	"context"
 	"fmt"
+	"sync"
 
+	"github.com/rs/zerolog"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	sdkresource "go.opentelemetry.io/otel/sdk/resource"
@@ -31,9 +44,9 @@ import (
 type Config struct {
 	Enabled        bool
 	ServiceVersion string
-	// Endpoint is the OTLP collector URL. Empty disables the exporter
-	// even when Enabled is true — useful for tests that want spans
-	// but no network traffic.
+	// Endpoint is the OTLP collector URL. Empty means no exporter is
+	// configured; Init degrades to a noop provider even when Enabled is
+	// true (see ADR-010).
 	Endpoint string
 }
 
@@ -58,20 +71,40 @@ func (p *Provider) Tracer(name string) trace.Tracer {
 	return p.tp.Tracer(name)
 }
 
-// Init constructs a Provider per cfg. When cfg.Enabled is false, a
-// noop provider is returned and Shutdown is a no-op. The global otel
-// TracerProvider is set to the new provider so callers that reach for
-// otel.Tracer("...") see the same configuration.
+// degradedWarnOnce guards the "enabled without endpoint" Warn so repeated
+// Init calls (e.g. from a future config-reload loop) fire the warning
+// exactly once per process.
+var degradedWarnOnce sync.Once
+
+// Init constructs a Provider per cfg and sets it as the global otel
+// TracerProvider so callers that reach for otel.Tracer("...") see the
+// same configuration. The supplied logger receives the degraded-state
+// warning; pass the already-configured CLI logger (typically the one
+// returned by ui.NewLogger) so the message renders through the same
+// writer as the rest of the terminal output. Tests pass zerolog.Nop().
 //
-// The enabled branch builds an SDK TracerProvider with no exporter —
-// spans record but never leave the process. This is intentional until
-// v2 wires an OTLP exporter (see ADR-010); do not "fix" by adding a
-// batcher without also solving the collector endpoint and auth story.
-func Init(cfg Config) (*Provider, error) {
+// Behaviour depends on the (Enabled, Endpoint) pair:
+//
+//   - Enabled == false: noop provider, Shutdown is a no-op.
+//   - Enabled == true, Endpoint == "": noop provider plus one Warn log
+//     line pointing at ADR-010, emitted at most once per process
+//     regardless of how many times Init is called.
+//   - Enabled == true, Endpoint != "": SDK TracerProvider carrying the
+//     ruptor resource. The OTLP exporter wiring lands with ADR-010.
+//
+// Init returns an error only when building the SDK resource fails; the
+// degraded-state branch never errors so a user who set the flag in
+// anticipation of an exporter does not fail to start.
+func Init(cfg Config, logger zerolog.Logger) (*Provider, error) {
 	if !cfg.Enabled {
-		tp := noop.NewTracerProvider()
-		otel.SetTracerProvider(tp)
-		return &Provider{tp: tp}, nil
+		return newNoopProvider(), nil
+	}
+
+	if cfg.Endpoint == "" {
+		degradedWarnOnce.Do(func() {
+			logger.Warn().Msg("telemetry enabled but no exporter endpoint configured (ADR-010); spans will not be exported")
+		})
+		return newNoopProvider(), nil
 	}
 
 	res, err := newResource(cfg.ServiceVersion)
@@ -86,6 +119,12 @@ func Init(cfg Config) (*Provider, error) {
 		tp:       tp,
 		shutdown: tp.Shutdown,
 	}, nil
+}
+
+func newNoopProvider() *Provider {
+	tp := noop.NewTracerProvider()
+	otel.SetTracerProvider(tp)
+	return &Provider{tp: tp}
 }
 
 func newResource(serviceVersion string) (*sdkresource.Resource, error) {
