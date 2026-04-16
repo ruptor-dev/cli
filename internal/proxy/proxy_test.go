@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -227,4 +228,52 @@ func TestUnmatchedPathPassthrough(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, rec.Code)
 	assert.Contains(t, rec.Body.String(), "hello from backend")
+}
+
+// TestProxy_ShouldInject_ConcurrentAccess fires many parallel requests at
+// a configured test path to exercise Proxy.shouldInject — which calls
+// p.rng.Float64(). math/rand.Rand is not goroutine-safe, so without the
+// lock around p.rng the -race detector flags the RNG mutation. The test
+// asserts -race cleanliness, not probability fidelity (a statistical
+// assertion would be flaky).
+func TestProxy_ShouldInject_ConcurrentAccess(t *testing.T) {
+	t.Parallel()
+
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer backend.Close()
+
+	registry := faults.NewFaultRegistry()
+	cfg := &config.ProxyConfig{Port: 0, PassthroughURL: backend.URL}
+	tests := []config.TestConfig{
+		// Probability 0.5 so both branches of shouldInject fire under load,
+		// exercising injectFault and passthrough code paths both under
+		// concurrent RNG access.
+		{ID: "t1", Tool: "/search", Fault: types.FaultToolError, Probability: 0.5, StatusCode: 500, Body: "x"},
+	}
+
+	p := proxy.NewProxy(cfg, tests, registry, proxy.WithLogger(newTestLogger()))
+
+	const workers = 16
+	const iters = 64
+
+	var wg sync.WaitGroup
+	wg.Add(workers)
+	for i := 0; i < workers; i++ {
+		go func() {
+			defer wg.Done()
+			for j := 0; j < iters; j++ {
+				rec := httptest.NewRecorder()
+				req := httptest.NewRequest(http.MethodGet, "/search", nil)
+				p.ServeHTTP(rec, req)
+			}
+		}()
+	}
+	wg.Wait()
+
+	// Sanity: observations accumulated all hits.
+	obs := p.Observations()
+	require.Contains(t, obs, "t1")
+	assert.Equal(t, workers*iters, obs["t1"].Hits)
 }

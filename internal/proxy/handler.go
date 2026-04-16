@@ -45,6 +45,8 @@ func (p *Proxy) matchTest(path string) (config.TestConfig, bool) {
 
 // shouldInject rolls a random number and returns true if the fault should fire.
 func (p *Proxy) shouldInject(probability float64) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	return p.rng.Float64() < probability
 }
 
