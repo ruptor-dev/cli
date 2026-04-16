@@ -7,6 +7,7 @@ package mcp
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math/rand"
@@ -24,7 +25,9 @@ import (
 )
 
 // MaxBodySize is the maximum request body size the proxy will buffer.
-// Requests larger than 10 MB are rejected to prevent OOM from untrusted clients.
+// Requests larger than 10 MB are rejected with HTTP 413 Request Entity Too
+// Large to prevent OOM from untrusted clients. The oversized body is never
+// forwarded upstream and does not count toward any test's observation stats.
 const MaxBodySize = 10 << 20 // 10 MB
 
 // Observation accumulates per-test signals the proxy collects while the
@@ -119,10 +122,24 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Buffer the body so we can peek and still forward it.
-	body, err := io.ReadAll(io.LimitReader(r.Body, MaxBodySize))
-	r.Body.Close()
+	// Buffer the body so we can peek and still forward it. MaxBytesReader
+	// enforces the size cap: if the client sends more than MaxBodySize, the
+	// read returns *http.MaxBytesError and the underlying body is closed,
+	// so no truncated payload ever reaches the parser or the upstream.
+	r.Body = http.MaxBytesReader(w, r.Body, MaxBodySize)
+	body, err := io.ReadAll(r.Body)
+	_ = r.Body.Close()
 	if err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			h.logger.Warn().
+				Int64("limit", maxErr.Limit).
+				Msg("mcp: request body exceeds MaxBodySize")
+			http.Error(w,
+				fmt.Sprintf("request body exceeds %d bytes", MaxBodySize),
+				http.StatusRequestEntityTooLarge)
+			return
+		}
 		h.logger.Error().Err(err).Msg("mcp: read body")
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return

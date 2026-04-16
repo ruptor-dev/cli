@@ -276,6 +276,86 @@ func TestMCPEmptyResponseFault(t *testing.T) {
 	assert.Empty(t, rec.Body.String())
 }
 
+// TestServeHTTP_BodyOverflow_Returns413 ensures that a request body larger
+// than MaxBodySize is rejected with 413 and never forwarded upstream. The
+// oversized request must not be counted as a hit against any test.
+func TestServeHTTP_BodyOverflow_Returns413(t *testing.T) {
+	// Backend must never be called for an over-limit request. If it is,
+	// the test will detect the bad-passthrough via the flag.
+	var upstreamHit bool
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamHit = true
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer backend.Close()
+
+	tests := []config.TestConfig{
+		{
+			ID:          "test-search",
+			Tool:        "search",
+			Fault:       types.FaultToolError,
+			Probability: 1.0,
+		},
+	}
+	h := newHandler(t, backend, tests)
+
+	// Build a body that starts as JSON-RPC-ish but is MaxBodySize+1 bytes.
+	// Content doesn't matter: the read must fail before Unmarshal.
+	oversized := make([]byte, mcp.MaxBodySize+1)
+	prefix := []byte(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"search","arguments":{"pad":"`)
+	copy(oversized, prefix)
+	for i := len(prefix); i < len(oversized)-2; i++ {
+		oversized[i] = 'a'
+	}
+	oversized[len(oversized)-2] = '"'
+	oversized[len(oversized)-1] = '}'
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(oversized))
+	req.Header.Set("Content-Type", "application/json")
+	h.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusRequestEntityTooLarge, rec.Code,
+		"over-limit body must be rejected with 413")
+	assert.False(t, upstreamHit,
+		"upstream must never receive a truncated over-limit body")
+
+	// Overflow must not pollute hit counts.
+	obs := h.Observations()
+	assert.Empty(t, obs, "over-limit request must not record observations")
+}
+
+// TestServeHTTP_BodyExactlyMaxSize_NotRejected confirms the edge case: a
+// body of exactly MaxBodySize bytes is NOT rejected by the size check. It
+// may still fail JSON parsing (padding isn't valid JSON-RPC) and fall
+// through to passthrough — that's fine; the point is the 413 path doesn't
+// fire.
+func TestServeHTTP_BodyExactlyMaxSize_NotRejected(t *testing.T) {
+	backend := mockMCPServer()
+	defer backend.Close()
+
+	h := newHandler(t, backend, nil)
+
+	// Exactly MaxBodySize bytes. Use a padded valid JSON-RPC so the
+	// handler parses it and passes through cleanly.
+	body := make([]byte, mcp.MaxBodySize)
+	prefix := []byte(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"pad":"`)
+	copy(body, prefix)
+	for i := len(prefix); i < len(body)-2; i++ {
+		body[i] = 'a'
+	}
+	body[len(body)-2] = `"`[0]
+	body[len(body)-1] = '}'
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	h.ServeHTTP(rec, req)
+
+	assert.NotEqual(t, http.StatusRequestEntityTooLarge, rec.Code,
+		"body of exactly MaxBodySize must not trigger 413")
+}
+
 func TestMCPIsMCPRequest(t *testing.T) {
 	tests := []struct {
 		name   string
