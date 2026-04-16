@@ -1,6 +1,6 @@
 # MCP observations not wired to evaluator
 
-> Status: **Reopened — 2026-04-16** (previously landed then reverted)
+> Status: **Done — 2026-04-16 (sink interface in mcp package; narrow 2-method contract; *proxy.Proxy.SetActiveTest + ResetObservation preserved)**
 > Opened: 2026-04-15
 > Priority: **ship-critical** (MCP is a v1 feature; must have working scores)
 > Est. effort: **S** (half day)

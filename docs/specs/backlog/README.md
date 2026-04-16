@@ -19,7 +19,7 @@ without the context of the session that opened it. Sorted by priority.
 | ~~[evaluator-recovered-signal](evaluator-recovered-signal.md)~~ | ship-critical | M | **resolved** | ✅ done | Option A shipped: `proxy.Observation.Recovered()` wired into `evaluateTest`; recovery semantics documented. |
 | ~~[otel-exporter-wiring](otel-exporter-wiring.md)~~ | high | XS | **resolved** | ✅ done | Option B: deferred to v2, v1-scope updated, ADR-010 filed. Must ship in v2. |
 | ~~[mcp-proxy-mode](mcp-proxy-mode.md)~~ | ship-critical | L | **resolved** | ✅ done | MCP proxy v1 shipped: Streamable HTTP, `tools/call` only. stdio/SSE/non-tool-call/WebSocket → v2. See ADR-011. |
-| [mcp-observations-evaluator](mcp-observations-evaluator.md) | ship-critical | S | **yes** | **reopened** | Option B landed then reverted — must not remove `*Proxy.SetActiveTest` / `ResetObservation`; retry with narrow interface. |
+| ~~[mcp-observations-evaluator](mcp-observations-evaluator.md)~~ | ship-critical | S | **resolved** | ✅ done | Narrow `mcp.ObservationSink` (consumer-side interface) routes MCP observations into `*proxy.Proxy`; `SetActiveTest` / `ResetObservation` preserved. |
 | [mcp-sse-streaming](mcp-sse-streaming.md) | medium | M | no | pending | SSE streaming deferred from MCP v1 — faults not injected on SSE responses. |
 | [ui-stdout-stderr-split](ui-stdout-stderr-split.md) | medium | S | **yes** | pending | Route `ui.Success`/`Error`/`Info`/`Warning`/`Dim` to stderr; previously landed then reverted, needs redesign + test migration. |
 | [tui-log-panel-scrollable](tui-log-panel-scrollable.md) | medium | M | no | pending | Layer B upgrade to the `-v` log panel: `bubbles/v2` viewport with scroll keys + auto-tail toggle. |
