@@ -51,8 +51,22 @@ func (p *Proxy) Observations() map[string]Observation {
 	return out
 }
 
-// recordFault updates the observation for a fault-injected request.
-func (p *Proxy) recordFault(testID string, statusCode int) {
+// RecordFault updates the observation for a fault-injected request.
+//
+// A call to RecordFault is by definition an error — the proxy fired a
+// fault on the matched test, regardless of the transport-level status
+// code. For HTTP mode this is a tautology (every injected fault returns
+// >= 400 or 0); for MCP mode the old status-code guard would have
+// mis-classified the JSON-RPC-over-HTTP-200 pattern, because MCP fault
+// responses ride on HTTP 200 and carry the error in the JSON-RPC
+// envelope. We therefore set HadError unconditionally here and let the
+// caller (HTTP handler or MCP handler via the ObservationSink interface)
+// decide when a fault actually fired.
+//
+// This method satisfies the mcp.ObservationSink contract — the MCP
+// handler invokes it through that interface to keep HTTP and MCP
+// observations in a single map.
+func (p *Proxy) RecordFault(testID string, statusCode int) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -60,17 +74,17 @@ func (p *Proxy) recordFault(testID string, statusCode int) {
 	o.Hits++
 	o.FaultsInjected++
 	o.LastStatusCode = statusCode
-	if statusCode >= 400 || statusCode == 0 {
-		// statusCode == 0 represents "no status written" (e.g. timeout
-		// fault that closes the socket or returns 504 without body).
-		o.HadError = true
-	}
+	o.HadError = true
 }
 
-// recordPassthrough updates the observation for a matched-but-not-fired
+// RecordPassthrough updates the observation for a matched-but-not-fired
 // request that was proxied through. We track only the hit count and
 // status code so the evaluator sees whether the path was exercised.
-func (p *Proxy) recordPassthrough(testID string, statusCode int) {
+//
+// This method satisfies the mcp.ObservationSink contract — see
+// RecordFault for context on why the sink interface lives in the mcp
+// package.
+func (p *Proxy) RecordPassthrough(testID string, statusCode int) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -89,11 +103,4 @@ func (p *Proxy) ensureObs(testID string) *Observation {
 		p.obs[testID] = o
 	}
 	return o
-}
-
-// MCPHandler returns the MCP handler if one is configured (mode "mcp" or
-// "auto"), nil otherwise. The orchestrator uses this to access MCP-specific
-// observations.
-func (p *Proxy) MCPHandler() interface{} {
-	return p.mcpHandler
 }
