@@ -99,7 +99,13 @@ output:
 ruptor run chaos.yaml
 ruptor run chaos.yaml --output report.html
 ruptor run chaos.yaml --test timeout_on_search
+ruptor run chaos.yaml -v                    # tail runner/proxy logs in a TUI panel
 ```
+
+All runner and proxy events land in `<~/.ruptor/runs/TIMESTAMP>/ruptor.log`
+whether or not `-v` is set. The flag only decides whether the stream
+is also surfaced live: as a TUI panel in an interactive terminal, or
+on stderr when piped / CI.
 
 ---
 

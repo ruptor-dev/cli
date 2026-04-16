@@ -1,12 +1,26 @@
 # MCP observations not wired to evaluator
 
-> Status: **Done — 2026-04-16**
+> Status: **Reopened — 2026-04-16** (previously landed then reverted)
 > Opened: 2026-04-15
 > Priority: **ship-critical** (MCP is a v1 feature; must have working scores)
 > Est. effort: **S** (half day)
-> Decision required: **no**
+> Decision required: **yes — Option B previously, reverted, re-evaluate**
 
-## Shipped
+## History
+
+Option B (ObservationSink callback interface) landed as commit `1c59d35`
+and was reverted in `8187783` because the sink refactor removed
+`*proxy.Proxy.SetActiveTest` and `*proxy.Proxy.ResetObservation`, which
+the HTTP orchestrator relies on to pin per-test observations between
+oneshot runs. Removing them silently broke the live TUI sync.
+
+Re-attempting this spec must NOT remove those two methods. Either keep
+the sink interface narrow (2 methods) alongside the existing Proxy
+methods, or widen the interface to include lifecycle methods. Prior
+DE review recommended the narrow interface; the sibling methods stay
+on `*proxy.Proxy`.
+
+## Shipped (now reverted)
 
 Option B (callback interface). `internal/proxy.ObservationSink` defines the
 two-method contract (`RecordFault`, `RecordPassthrough`); `*proxy.Proxy`
