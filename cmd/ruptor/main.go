@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -92,24 +93,26 @@ func newRunCmd() *cobra.Command {
 	var outputPath string
 	var testFilter string
 	var cloudFlag bool
+	var verbose bool
 
 	cmd := &cobra.Command{
 		Use:   "run <config-file>",
 		Short: "Run chaos tests against an AI agent",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runChaos(cmd.Context(), args[0], outputPath, testFilter, cloudFlag)
+			return runChaos(cmd.Context(), args[0], outputPath, testFilter, cloudFlag, verbose)
 		},
 	}
 
 	cmd.Flags().StringVar(&outputPath, "output", "", "output file path for the report")
 	cmd.Flags().StringVar(&testFilter, "test", "", "run only the test with this ID")
 	cmd.Flags().BoolVar(&cloudFlag, "cloud", false, "spool report to ~/.ruptor/pending/ for upload by `ruptor sync`")
+	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "tee runner/proxy logs to stderr alongside <runDir>/ruptor.log (may interleave with the TUI)")
 
 	return cmd
 }
 
-func runChaos(ctx context.Context, cfgPath, outputPath, testFilter string, cloudFlag bool) error {
+func runChaos(ctx context.Context, cfgPath, outputPath, testFilter string, cloudFlag, verbose bool) error {
 	cfg, err := config.LoadChaos(cfgPath)
 	if err != nil {
 		return fmt.Errorf("loading config: %w", err)
@@ -135,11 +138,23 @@ func runChaos(ctx context.Context, cfgPath, outputPath, testFilter string, cloud
 	if runDir != "" {
 		logFilePath = filepath.Join(runDir, "ruptor.log")
 		if f, err := os.Create(logFilePath); err == nil {
-			logger = ui.NewLoggerTo(f, ui.LogInfo)
+			// Verbose opts into log-vs-TUI interleave: events land in
+			// both ruptor.log and the operator's terminal. The live
+			// TUI is unchanged; the operator explicitly asked to see
+			// the stream.
+			if verbose {
+				logger = ui.NewLoggerTo(io.MultiWriter(f, os.Stderr), ui.LogInfo)
+			} else {
+				logger = ui.NewLoggerTo(f, ui.LogInfo)
+			}
 			defer f.Close()
 		} else {
 			logFilePath = ""
 		}
+	} else if verbose {
+		// No run dir — fall back to rootLogger (stderr). Matches the
+		// verbose contract even when we could not open the log file.
+		logger = ui.NewLogger(ui.LogInfo)
 	}
 
 	registry := faults.NewFaultRegistry()
