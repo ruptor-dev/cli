@@ -14,20 +14,32 @@ import (
 	"os"
 )
 
-var out io.Writer = os.Stdout
+// out carries data (pipeable); errOut carries diagnostics (warnings, errors).
+var (
+	out    io.Writer = os.Stdout
+	errOut io.Writer = os.Stderr
+)
 
-// SetWriter overrides the destination writer. Intended for tests.
+// SetWriter overrides the data-stream writer (stdout). Intended for tests
+// that capture pipeable output.
 func SetWriter(w io.Writer) { out = w }
 
-// Writer returns the current destination writer.
+// SetErrWriter overrides the diagnostic-stream writer (stderr). Intended
+// for tests that capture warnings, errors, and other diagnostic output.
+func SetErrWriter(w io.Writer) { errOut = w }
+
+// Writer returns the current data-stream writer.
 func Writer() io.Writer { return out }
 
-// Println writes a line of plain text followed by a newline.
+// ErrWriter returns the current diagnostic-stream writer.
+func ErrWriter() io.Writer { return errOut }
+
+// Println writes a line of plain text followed by a newline to stdout.
 func Println(s string) {
 	fmt.Fprintln(out, s)
 }
 
-// Printf writes formatted text with no trailing newline.
+// Printf writes formatted text with no trailing newline to stdout.
 func Printf(format string, a ...any) {
 	fmt.Fprintf(out, format, a...)
 }

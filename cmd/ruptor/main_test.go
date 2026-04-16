@@ -56,12 +56,14 @@ func TestReportPathsFor(t *testing.T) {
 }
 
 // TestWarnIfMCPModeUnscored_FiresForMCPAndAuto asserts the runtime
-// warning (mcpUnscoredWarning) reaches ui.Writer() when proxy.mode is
-// "mcp" or "auto" — the two modes that can route traffic through the
-// MCP handler. HTTP-only runs must stay silent so the copy does not
-// apply to users who are unaffected by the observation gap. The
+// warning (mcpUnscoredWarning) reaches ui.ErrWriter() when proxy.mode
+// is "mcp" or "auto" — the two modes that can route traffic through
+// the MCP handler. HTTP-only runs must stay silent so the copy does
+// not apply to users who are unaffected by the observation gap. The
 // warning is live until docs/specs/backlog/mcp-observations-evaluator.md
-// lands; it is NOT a debug artifact.
+// lands; it is NOT a debug artifact. Warnings are routed to stderr so
+// `ruptor run ... | jq` keeps stdout clean; the capture therefore goes
+// through ui.SetErrWriter, not ui.SetWriter.
 func TestWarnIfMCPModeUnscored_FiresForMCPAndAuto(t *testing.T) {
 	cases := []struct {
 		mode    string
@@ -78,9 +80,9 @@ func TestWarnIfMCPModeUnscored_FiresForMCPAndAuto(t *testing.T) {
 	for _, tc := range cases {
 		t.Run("mode="+tc.mode, func(t *testing.T) {
 			var buf bytes.Buffer
-			prev := ui.Writer()
-			ui.SetWriter(&buf)
-			defer ui.SetWriter(prev)
+			prev := ui.ErrWriter()
+			ui.SetErrWriter(&buf)
+			defer ui.SetErrWriter(prev)
 
 			warnIfMCPModeUnscored(&config.ChaosConfig{
 				Proxy: config.ProxyConfig{Mode: tc.mode},

@@ -84,11 +84,15 @@ func TestFormatDuration(t *testing.T) {
 	}
 }
 
-func TestOutputHelpers_WriteThroughWriter(t *testing.T) {
+func TestOutputHelpers_WriteThroughErrWriter(t *testing.T) {
+	// Success/Error/Info/Warning/Dim are diagnostic helpers routed to
+	// stderr — capture via SetErrWriter, not SetWriter. This guards the
+	// stdout-vs-stderr split: any helper that regressed to stdout would
+	// silently drop from the buffer and fail the assertion below.
 	var buf bytes.Buffer
-	prev := Writer()
-	SetWriter(&buf)
-	defer SetWriter(prev)
+	prev := ErrWriter()
+	SetErrWriter(&buf)
+	defer SetErrWriter(prev)
 
 	Success("saved")
 	Error("bad")
@@ -100,6 +104,21 @@ func TestOutputHelpers_WriteThroughWriter(t *testing.T) {
 	for _, want := range []string{"saved", "bad", "here", "watch", "idle"} {
 		assert.Contains(t, plain, want)
 	}
+}
+
+func TestPlainHelpers_WriteThroughWriter(t *testing.T) {
+	// Println/Printf carry pipeable data and must stay on stdout.
+	var buf bytes.Buffer
+	prev := Writer()
+	SetWriter(&buf)
+	defer SetWriter(prev)
+
+	Println("line")
+	Printf("formatted %d\n", 7)
+
+	got := buf.String()
+	assert.Contains(t, got, "line")
+	assert.Contains(t, got, "formatted 7")
 }
 
 func TestIconFor(t *testing.T) {
