@@ -71,7 +71,10 @@ type runModel struct {
 
 // NewRunProgress builds a Bubbletea program for the live run view.
 // Caller invokes Run() to block until the user quits or the snapshot
-// returns Done=true.
+// returns Done=true. The View uses the alternate screen buffer so
+// proxy and runner log output (which writes to stderr) does not
+// interleave with TUI repaints; the terminal restores the primary
+// buffer on exit.
 func NewRunProgress(ctx RunContext) *tea.Program {
 	m := runModel{ctx: ctx}
 	return tea.NewProgram(m)
@@ -141,7 +144,9 @@ func (m runModel) View() tea.View {
 	b.WriteString(m.renderScore())
 	b.WriteString("\n\n")
 	b.WriteString(m.renderFooter())
-	return tea.NewView(b.String())
+	v := tea.NewView(b.String())
+	v.AltScreen = true
+	return v
 }
 
 func (m runModel) renderHeader() string {

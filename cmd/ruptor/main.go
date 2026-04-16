@@ -120,6 +120,22 @@ func runChaos(ctx context.Context, cfgPath, outputPath, testFilter string, cloud
 		return err
 	}
 
+	// Create the run log dir first so the interactive TUI can silence
+	// stderr logging (proxy/runner events would otherwise fight with
+	// bubbletea for the terminal). The logs still land on disk.
+	runDir, err := newRunLogDir()
+	if err != nil {
+		logger.Warn().Err(err).Msg("could not create run log dir; agent stdout will go to a temp file")
+	}
+
+	if ui.IsInteractive() && runDir != "" {
+		logPath := filepath.Join(runDir, "run.log")
+		if f, ferr := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644); ferr == nil {
+			defer f.Close()
+			logger = ui.NewLoggerTo(f, ui.LogInfo)
+		}
+	}
+
 	registry := faults.NewFaultRegistry()
 
 	judge, err := buildJudge(cfg.Evaluation.LLMJudge, logger)
@@ -152,11 +168,6 @@ func runChaos(ctx context.Context, cfgPath, outputPath, testFilter string, cloud
 		Int("tests", len(tests)).
 		Int("port", cfg.Proxy.Port).
 		Msg("ruptor chaos proxy starting")
-
-	runDir, err := newRunLogDir()
-	if err != nil {
-		logger.Warn().Err(err).Msg("could not create run log dir; agent stdout will go to a temp file")
-	}
 
 	durations := newDurationTracker()
 	runStart := time.Now()
