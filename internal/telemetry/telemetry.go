@@ -1,14 +1,17 @@
-// Package telemetry wires ruptor's opt-in OpenTelemetry tracing.
+// Package telemetry holds ruptor's OpenTelemetry tracer plumbing.
 //
-// Security rule: telemetry is DISABLED by default. It is enabled only after
-// explicit `ruptor auth login` (user knowingly connects to cloud) or by
-// setting RUPTOR_TELEMETRY_ENABLED=true. The telemetry payload contains
-// ONLY: command name, fault types used, run duration, ruptor version.
-// NEVER: tool response content, agent output, file paths, user data, IP.
+// Deferred to v2 (see ADR-010). Init intentionally constructs a
+// TracerProvider with no exporter: the collector endpoint
+// (telemetry.ruptor.dev) does not exist yet, and shipping a live
+// TracerProvider that silently drops spans would lie about what v1
+// does. The package is kept so v2 can plug an OTLP exporter in one
+// place without relocating every span call site.
 //
-// The v1 implementation provides the tracer plumbing so the rest of the
-// code base can annotate spans; the OTLP exporter lands with the
-// `ruptor auth login` PR (auth token required to hit telemetry.ruptor.dev).
+// When the exporter lands, the span payload must stay within the
+// existing allowlist enforced by RecordRun: command name, fault
+// types, run duration, ruptor version. Tool response bodies, agent
+// output, file paths, user data, and IP addresses are not eligible
+// and the function signature is the contract.
 package telemetry
 
 import (
@@ -59,6 +62,11 @@ func (p *Provider) Tracer(name string) trace.Tracer {
 // noop provider is returned and Shutdown is a no-op. The global otel
 // TracerProvider is set to the new provider so callers that reach for
 // otel.Tracer("...") see the same configuration.
+//
+// The enabled branch builds an SDK TracerProvider with no exporter —
+// spans record but never leave the process. This is intentional until
+// v2 wires an OTLP exporter (see ADR-010); do not "fix" by adding a
+// batcher without also solving the collector endpoint and auth story.
 func Init(cfg Config) (*Provider, error) {
 	if !cfg.Enabled {
 		tp := noop.NewTracerProvider()

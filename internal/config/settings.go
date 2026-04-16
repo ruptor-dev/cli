@@ -28,7 +28,7 @@ type Settings struct {
 	// CloudEnabled is true when the --cloud flag is set (runtime only;
 	// never persisted to disk).
 	CloudEnabled bool `mapstructure:"-"`
-	// TelemetryEnabled is opt-in; flipped on after `ruptor auth login`.
+	// Deferred to v2 — exporter not wired; env var remains functional for forward compat.
 	TelemetryEnabled bool `mapstructure:"telemetry_enabled"`
 	// OutputPath is the default report destination when a command does
 	// not override it with --output.
