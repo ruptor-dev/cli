@@ -361,7 +361,20 @@ func (m runModel) View() tea.View {
 	b.WriteString(m.renderScore())
 	b.WriteString("\n\n")
 	b.WriteString(m.renderFooter())
-	return tea.NewView(b.String())
+	v := tea.NewView(b.String())
+	// Verbose mode mounts the scrollable log panel. Inline rendering
+	// cannot cleanly overwrite a frame whose row widths change as the
+	// ring buffer fills — empty rows are narrow, log-line rows are
+	// wide, and bubbletea's inline diff leaves the leftover glyphs in
+	// place. Alt-screen guarantees a full clear between frames so the
+	// panel, experiments box, and score bar stay aligned. Enable
+	// mouse cell motion at the same time so `viewport.MouseWheelEnabled`
+	// actually receives wheel events.
+	if m.ctx.LogReader != nil {
+		v.AltScreen = true
+		v.MouseMode = tea.MouseModeCellMotion
+	}
+	return v
 }
 
 func (m runModel) renderHeader() string {
