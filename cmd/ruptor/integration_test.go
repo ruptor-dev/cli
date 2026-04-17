@@ -117,7 +117,8 @@ func TestValidateValidConfig(t *testing.T) {
 func TestValidateInvalidConfig(t *testing.T) {
 	// Invalid config must exit non-zero AND emit an error message
 	// through ui.Error — see cmd/ruptor/main.go. The exact text may
-	// change; we only assert that *some* error text reaches stderr.
+	// change; we only assert that *some* error text reaches the output
+	// stream (stdout today; stderr once ui-stdout-stderr-split lands).
 	out, code := runRuptor(t, "validate", repoPath(t, "testdata", "chaos_invalid.yaml"))
 	require.NotEqual(t, 0, code, "invalid config must exit non-zero")
 	assert.NotEmpty(t, strings.TrimSpace(out), "expected error text from ui.Error")
