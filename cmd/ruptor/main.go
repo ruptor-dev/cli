@@ -47,6 +47,7 @@ var (
 func main() {
 	rootCmd := newRootCmd()
 	if err := rootCmd.Execute(); err != nil {
+		ui.Error(err.Error())
 		os.Exit(1)
 	}
 }
