@@ -16,6 +16,7 @@ import (
 	"github.com/ruptor-dev/cli/internal/config"
 	"github.com/ruptor-dev/cli/internal/proxy/faults"
 	"github.com/ruptor-dev/cli/internal/proxy/mcp"
+	"github.com/ruptor-dev/cli/pkg/types"
 )
 
 const (
@@ -87,17 +88,7 @@ func NewProxy(cfg *config.ProxyConfig, tests []config.TestConfig, registry *faul
 		opt(p)
 	}
 
-	// Initialise MCP handler for "mcp" or "auto" modes. p satisfies
-	// mcp.ObservationSink via RecordFault/RecordPassthrough, so MCP
-	// observations land in the same map the evaluator reads via
-	// p.Observations(). See docs/specs/backlog/mcp-observations-evaluator.md.
-	mode := strings.ToLower(string(cfg.Mode))
-	if mode == "mcp" || mode == "auto" {
-		if target, err := url.Parse(cfg.PassthroughURL); err == nil {
-			p.mcpHandler = mcp.NewHandler(target, tests, registry, p.logger,
-				rand.New(rand.NewSource(time.Now().UnixNano())), p)
-		}
-	}
+	p.mcpHandler = newMCPHandler(cfg, tests, registry, p.logger, p)
 
 	p.server = &http.Server{
 		Handler:      p,
@@ -106,6 +97,27 @@ func NewProxy(cfg *config.ProxyConfig, tests []config.TestConfig, registry *faul
 	}
 
 	return p
+}
+
+// newMCPHandler builds the MCP sub-handler when the proxy is in
+// "mcp" or "auto" mode. Returns nil (and no error) for other modes
+// or for malformed passthrough URLs — callers treat nil as "HTTP-only".
+// The returned handler uses sink as its types.ObservationSink so MCP
+// observations share the proxy's observation map. See
+// docs/specs/backlog/mcp-observations-evaluator.md.
+func newMCPHandler(cfg *config.ProxyConfig, tests []config.TestConfig,
+	registry *faults.FaultRegistry, logger zerolog.Logger,
+	sink types.ObservationSink) *mcp.Handler {
+	mode := strings.ToLower(string(cfg.Mode))
+	if mode != "mcp" && mode != "auto" {
+		return nil
+	}
+	target, err := url.Parse(cfg.PassthroughURL)
+	if err != nil {
+		return nil
+	}
+	return mcp.NewHandler(target, tests, registry, logger,
+		rand.New(rand.NewSource(time.Now().UnixNano())), sink)
 }
 
 // Start begins listening and serving HTTP traffic. It blocks until ctx is
