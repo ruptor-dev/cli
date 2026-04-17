@@ -115,10 +115,35 @@ func TestValidateValidConfig(t *testing.T) {
 }
 
 func TestValidateInvalidConfig(t *testing.T) {
-	// Cobra is configured with SilenceErrors=true; observable
-	// contract is the non-zero exit code, not the message text.
-	_, code := runRuptor(t, "validate", repoPath(t, "testdata", "chaos_invalid.yaml"))
-	assert.NotEqual(t, 0, code, "invalid config must exit non-zero")
+	// Invalid config must exit non-zero AND emit an error message
+	// through ui.Error — see cmd/ruptor/main.go. The exact text may
+	// change; we only assert that *some* error text reaches stderr.
+	out, code := runRuptor(t, "validate", repoPath(t, "testdata", "chaos_invalid.yaml"))
+	require.NotEqual(t, 0, code, "invalid config must exit non-zero")
+	assert.NotEmpty(t, strings.TrimSpace(out), "expected error text from ui.Error")
+}
+
+// TestMain_UnknownSubcommand_PrintsError verifies that a typo or bogus
+// subcommand surfaces cobra's "unknown command" error to the user
+// instead of silently exiting 1 — regression test for the UX bug in
+// docs/specs/backlog/cobra-silence-errors.md.
+func TestMain_UnknownSubcommand_PrintsError(t *testing.T) {
+	out, code := runRuptor(t, "bogus-subcmd")
+	require.NotEqual(t, 0, code)
+	// Cobra's message is "unknown command \"bogus-subcmd\" for \"ruptor\"".
+	// We assert on a substring, not the full text, to stay robust to
+	// cobra upgrades.
+	assert.Contains(t, strings.ToLower(out), "unknown command")
+}
+
+// TestMain_RunMissingArg_PrintsUsageHint verifies that `ruptor run`
+// (no config file) surfaces cobra's usage-hint error rather than
+// exiting silently.
+func TestMain_RunMissingArg_PrintsUsageHint(t *testing.T) {
+	out, code := runRuptor(t, "run")
+	require.NotEqual(t, 0, code)
+	// cobra.ExactArgs(1) emits "accepts 1 arg(s), received 0".
+	assert.Contains(t, strings.ToLower(out), "arg")
 }
 
 func TestRunRejectsInvalidConfig(t *testing.T) {
