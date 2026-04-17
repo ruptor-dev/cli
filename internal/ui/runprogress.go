@@ -261,7 +261,8 @@ func (m runModel) routeLogKey(msg tea.KeyPressMsg) (bool, runModel, tea.Cmd) {
 		m.sticky = true
 		return true, m, nil
 	case "up", "down", "pgup", "pgdown":
-		return true, m.scrollViewport(msg), nil
+		next, cmd := m.scrollViewport(msg)
+		return true, next, cmd
 	}
 	return false, m, nil
 }
@@ -269,16 +270,17 @@ func (m runModel) routeLogKey(msg tea.KeyPressMsg) (bool, runModel, tea.Cmd) {
 // scrollViewport forwards a scroll key to the viewport and clears the
 // sticky flag if the offset actually moved. Offset-unchanged keys
 // (e.g. `up` at top) leave sticky as-is so a paused operator staying
-// put does not accidentally re-enter auto-tail.
-func (m runModel) scrollViewport(msg tea.KeyPressMsg) runModel {
+// put does not accidentally re-enter auto-tail. Propagates any tea.Cmd
+// the viewport returns so future bubbles/v2 animations (scrollbar
+// fade, etc.) are not silently dropped.
+func (m runModel) scrollViewport(msg tea.KeyPressMsg) (runModel, tea.Cmd) {
 	before := m.vp.YOffset()
 	var cmd tea.Cmd
 	m.vp, cmd = m.vp.Update(msg)
-	_ = cmd // viewport.Update returns nil cmds today; keep the assign for API parity
 	if m.vp.YOffset() != before {
 		m.sticky = false
 	}
-	return m
+	return m, cmd
 }
 
 // toggleSticky flips auto-tail. paused → sticky jumps to the bottom so
