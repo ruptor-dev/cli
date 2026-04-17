@@ -1,4 +1,4 @@
-.PHONY: build test lint run-example clean tools check release-dry release-check
+.PHONY: build test lint run-example clean tools check release-dry release-check smoke-tui
 
 BUILD_DIR  := ./bin
 BINARY     := $(BUILD_DIR)/ruptor
@@ -44,6 +44,10 @@ tools:
 	go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
 	go install github.com/goreleaser/goreleaser/v2@latest
 	@echo "Install cosign separately per your OS: https://docs.sigstore.dev/cosign/installation/"
+
+## smoke-tui: headless regression check for the --verbose log panel (pty)
+smoke-tui:
+	bash scripts/smoke-tui.sh
 
 ## release-check: validate the goreleaser config without building anything
 release-check:
