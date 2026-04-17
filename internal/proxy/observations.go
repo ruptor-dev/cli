@@ -60,10 +60,10 @@ func (p *Proxy) Observations() map[string]Observation {
 // mis-classified the JSON-RPC-over-HTTP-200 pattern, because MCP fault
 // responses ride on HTTP 200 and carry the error in the JSON-RPC
 // envelope. We therefore set HadError unconditionally here and let the
-// caller (HTTP handler or MCP handler via the ObservationSink interface)
-// decide when a fault actually fired.
+// caller (HTTP handler or MCP handler via the types.ObservationSink
+// interface) decide when a fault actually fired.
 //
-// This method satisfies the mcp.ObservationSink contract — the MCP
+// This method satisfies the types.ObservationSink contract — the MCP
 // handler invokes it through that interface to keep HTTP and MCP
 // observations in a single map.
 func (p *Proxy) RecordFault(testID string, statusCode int) {
@@ -81,9 +81,8 @@ func (p *Proxy) RecordFault(testID string, statusCode int) {
 // request that was proxied through. We track only the hit count and
 // status code so the evaluator sees whether the path was exercised.
 //
-// This method satisfies the mcp.ObservationSink contract — see
-// RecordFault for context on why the sink interface lives in the mcp
-// package.
+// This method satisfies the types.ObservationSink contract — see
+// RecordFault for context.
 func (p *Proxy) RecordPassthrough(testID string, statusCode int) {
 	p.mu.Lock()
 	defer p.mu.Unlock()

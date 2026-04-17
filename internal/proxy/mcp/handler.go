@@ -33,14 +33,14 @@ const MaxBodySize = 10 << 20 // 10 MB
 // Handler is the MCP-aware HTTP handler that sits in front of a JSON-RPC
 // 2.0 MCP server. It intercepts tools/call requests for fault injection
 // and passes everything else through. Per-test observations are handed to
-// the owning proxy via the ObservationSink interface.
+// the owning proxy via the types.ObservationSink interface.
 type Handler struct {
 	tests    []config.TestConfig
 	registry *faults.FaultRegistry
 	target   *url.URL
 	logger   zerolog.Logger
 	rng      *rand.Rand
-	sink     ObservationSink
+	sink     types.ObservationSink
 
 	// mu guards activeTest only. Observation state lives on the sink.
 	mu         sync.Mutex
@@ -58,7 +58,7 @@ func NewHandler(
 	registry *faults.FaultRegistry,
 	logger zerolog.Logger,
 	rng *rand.Rand,
-	sink ObservationSink,
+	sink types.ObservationSink,
 ) *Handler {
 	h := &Handler{
 		tests:    tests,

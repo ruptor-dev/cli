@@ -1,11 +1,9 @@
-package mcp
+package types
 
 // ObservationSink is the contract the MCP handler uses to hand per-test
 // observations to an owning proxy. A sink implementation is typically the
-// surrounding *proxy.Proxy: defining the interface here (consumer side)
-// lets the MCP handler record observations without importing the proxy
-// package, which would create an import cycle (proxy already imports mcp
-// for auto-dispatch).
+// surrounding *proxy.Proxy, so MCP and HTTP paths share a single
+// observation map that the evaluator consumes at shutdown.
 //
 // RecordFault is called every time the MCP handler injects a fault on a
 // matched tools/call. Implementations MUST treat every RecordFault call
