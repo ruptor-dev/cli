@@ -154,3 +154,82 @@ func TestLogPanel_NoViewportWhenReaderAbsent(t *testing.T) {
 	got := next.(runModel)
 	assert.False(t, got.aborted, "up without a log panel must be a no-op, not abort")
 }
+
+// TestView_AltScreenEnabledWhenLogReaderPresent guards the rendering
+// fix: without AltScreen, inline rendering leaves artefacts whenever
+// the log-panel row widths change between frames (empty → wide log
+// line). Alt-screen forces a full redraw each frame and keeps the
+// layout clean. Regression test for the "panel renders empty / lines
+// leak below the box" bug.
+func TestView_AltScreenEnabledWhenLogReaderPresent(t *testing.T) {
+	noReader := runModel{ctx: RunContext{ConfigFile: "chaos.yaml"}}
+	withReader := runModel{
+		ctx:    RunContext{ConfigFile: "chaos.yaml", LogReader: &fakeLogReader{lines: []string{"one"}}},
+		sticky: true,
+	}
+	withReader.vp = newLogViewport()
+	withReader.vpInit = true
+
+	assert.False(t, noReader.View().AltScreen, "non-verbose run must keep the existing inline render")
+	assert.True(t, withReader.View().AltScreen, "verbose run must flip AltScreen so the log panel frames render cleanly")
+}
+
+// TestView_MouseCellMotionEnabledWhenLogReaderPresent guards the
+// scrollwheel-support fix: bubbletea v2 only emits MouseWheelMsg when
+// the view asks for mouse cell motion. Without this flag the viewport's
+// MouseWheelEnabled has no effect and the wheel handler never fires.
+func TestView_MouseCellMotionEnabledWhenLogReaderPresent(t *testing.T) {
+	m := runModel{
+		ctx:    RunContext{ConfigFile: "chaos.yaml", LogReader: &fakeLogReader{lines: []string{"one"}}},
+		sticky: true,
+	}
+	m.vp = newLogViewport()
+	m.vpInit = true
+
+	v := m.View()
+	assert.Equal(t, tea.MouseModeCellMotion, v.MouseMode, "log panel must request cell-motion mouse so wheel events reach the viewport")
+}
+
+// TestView_WithLogReader_ContainsBufferedLines drives the model
+// through the same WindowSizeMsg + tickMsg sequence the real program
+// sees on startup, then asserts the buffered log line reaches the
+// rendered view. This is the single assertion that would have caught
+// the "empty log panel" regression — the live-render pipeline covered
+// end-to-end without a real TTY.
+func TestView_WithLogReader_ContainsBufferedLines(t *testing.T) {
+	reader := &fakeLogReader{lines: []string{"INF proxy started addr=:8080"}}
+	m := runModel{
+		ctx:    RunContext{ConfigFile: "chaos.yaml", LogReader: reader},
+		sticky: true,
+	}
+	m.vp = newLogViewport()
+	m.vpInit = true
+
+	mv, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	m1 := mv.(runModel)
+	require.Positive(t, m1.vp.Width(), "WindowSizeMsg must propagate a width to the viewport")
+
+	mv, _ = m1.Update(tickMsg{})
+	out := stripANSI(mustString(mv.(runModel).View()))
+
+	assert.Contains(t, out, "INF proxy started addr=:8080",
+		"buffered log line must reach the rendered frame after WindowSizeMsg+tickMsg")
+}
+
+// TestLogPanel_UnknownKey_DoesNotConsumeQ guards the abort path: when
+// the log panel is mounted, only the documented scroll keys are
+// consumed. Other keys (including `q`) must still reach the outer
+// handler so `q` aborts the run as promised in the footer hint.
+func TestLogPanel_UnknownKey_DoesNotConsumeQ(t *testing.T) {
+	m := seededModel(t, 10)
+
+	// A non-scroll key ('x') must pass through the route helper.
+	handled, _, _ := m.routeLogKey(tea.KeyPressMsg{Code: 'x'})
+	assert.False(t, handled, "unknown keys must fall through so q/ctrl+c can abort")
+
+	// Full Update path: pressing `q` with the panel mounted must set
+	// aborted and return a quit command.
+	next, cmd := m.Update(tea.KeyPressMsg{Text: "q", Code: 'q'})
+	require.NotNil(t, cmd, "q must emit a quit command even when the log panel is mounted")
+	assert.True(t, next.(runModel).aborted, "q must abort even when the log panel is mounted")
+}
