@@ -109,18 +109,38 @@ proxy event stream; the same events still land in
   inside the panel) and ignored when measuring width.
 - No keyboard or mouse handling on the panel — it is read-only.
 
-### Layer 2 — scrollable (deferred, `charm.land/bubbles/v2`)
+### Layer 2 — scrollable (shipped, `charm.land/bubbles/v2`)
 
-When the panel needs real scroll, mouse-wheel, or pause-tail, replace
-the inline render with a `viewport.Model` from `charm.land/bubbles/v2`.
-That dep is the only addition. New keybindings introduced at that
-point:
-- `↑` / `↓` / `PgUp` / `PgDn` — scroll
-- `s` — toggle auto-tail (sticky bottom vs. paused)
-- mouse wheel — scroll when the terminal supports mouse capture
+The log panel's body is a `viewport.Model` from
+`charm.land/bubbles/v2`. The dep is pinned in `go.mod`; the viewport
+is only instantiated when `ctx.LogReader` is non-nil so non-verbose
+runs keep Layer 1 semantics (no panel, no keybindings consumed).
 
-Layer 2 is OUT for the minimum-viable rollout; do not pull in bubbles
-until the operator explicitly asks for scroll.
+Keybindings:
+
+| Key              | Action                                           |
+|------------------|--------------------------------------------------|
+| `↑` / `↓`        | scroll by one line                               |
+| `PgUp` / `PgDn`  | scroll by panel height                           |
+| `Home` / `End`   | jump to top / bottom of buffer                   |
+| `s`              | toggle auto-tail (sticky) vs. paused             |
+| mouse wheel      | scroll when the terminal has mouse capture       |
+
+Auto-tail semantics:
+
+- Default on entry: **sticky = true**. Each tick refreshes the
+  viewport from the ring buffer, then calls `GotoBottom()` so the
+  newest line is visible.
+- Any manual scroll (`↑`, `PgUp`, mouse wheel, etc.) that actually
+  moves `YOffset` flips sticky to `false`. Further ticks leave the
+  operator's offset alone.
+- `Home` forces paused; `End` forces sticky.
+- `s` toggles: sticky → paused (freeze at current offset), paused →
+  sticky (immediately jump to bottom).
+
+Panel title reflects state: `· tail · -v` when sticky,
+`· paused (s) · -v` when frozen — the `(s)` advertises the unfreeze
+key.
 
 ### Verbose semantics
 
@@ -248,12 +268,11 @@ unless the model needs to distinguish the two.
 v2 libraries live on `charm.land/`, not `github.com/charmbracelet/`:
 ```go
 import (
-    tea      "charm.land/bubbletea/v2"
-             "charm.land/lipgloss/v2"
-    // bubbles/v2 is charm.land/bubbles/v2 — not yet imported.
+    "charm.land/bubbles/v2/viewport"
+    tea "charm.land/bubbletea/v2"
+    "charm.land/lipgloss/v2"
 )
 ```
 
-`go.mod` pins `charm.land/bubbletea/v2` and `charm.land/lipgloss/v2`.
-If `bubbles` components are added later, they come from
-`charm.land/bubbles/v2`.
+`go.mod` pins `charm.land/bubbletea/v2`, `charm.land/lipgloss/v2`, and
+`charm.land/bubbles/v2` (added with the Layer 2 scrollable log panel).

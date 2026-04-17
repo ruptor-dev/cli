@@ -22,7 +22,7 @@ without the context of the session that opened it. Sorted by priority.
 | ~~[mcp-observations-evaluator](mcp-observations-evaluator.md)~~ | ship-critical | S | **resolved** | ✅ done | Narrow `types.ObservationSink` in `pkg/types/` routes MCP observations into `*proxy.Proxy`; `SetActiveTest` / `ResetObservation` preserved. |
 | [mcp-sse-streaming](mcp-sse-streaming.md) | medium | M | no | pending | SSE streaming deferred from MCP v1 — faults not injected on SSE responses. |
 | [ui-stdout-stderr-split](ui-stdout-stderr-split.md) | medium | S | **yes** | pending | Route `ui.Success`/`Error`/`Info`/`Warning`/`Dim` to stderr; previously landed then reverted, needs redesign + test migration. |
-| [tui-log-panel-scrollable](tui-log-panel-scrollable.md) | medium | M | no | pending | Layer B upgrade to the `-v` log panel: `bubbles/v2` viewport with scroll keys + auto-tail toggle. |
+| ~~[tui-log-panel-scrollable](tui-log-panel-scrollable.md)~~ | medium | M | no | ✅ done | `bubbles/v2` viewport wired into the `-v` log panel: scroll keys, mouse wheel, `s` toggles auto-tail, title shows `tail`/`paused (s)`. |
 | [proxy-mode-decode-validator](proxy-mode-decode-validator.md) | low | XS | no | pending | `ProxyMode.UnmarshalYAML/Text` — reject non-canonical values at decode, not just at Validate. |
 | ~~[cobra-silence-errors](cobra-silence-errors.md)~~ | medium | XS | no | ✅ done | Option A: errors printed via `ui.Error` in `main`; integration tests cover unknown-subcmd and missing-arg paths. |
 | [testing-comprehensive-plan](testing-comprehensive-plan.md) | high | XL | **resolved** | pending | 60-category testing plan, all decisions locked. Supersedes `testing-coverage-matrix.md`. Subsumes `fuzz-parsers`, `examples-ci-smoke`, `make-test-int-target`. |

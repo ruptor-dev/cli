@@ -1,10 +1,16 @@
 # TUI log panel — Layer B (scrollable viewport)
 
-> Status: **Backlog**
+> Status: **Done — 2026-04-17**
 > Opened: 2026-04-16
 > Priority: **medium** — upgrade on top of shipped Layer A
 > Est. effort: **M** (1 day)
 > Decision required: **no** — pattern is pinned in `SKILL-ui.md`
+>
+> Shipped on branch `feat/tui-log-panel-scrollable`. Three commits:
+> `chore(deps): add charm.land/bubbles/v2 …`,
+> `feat(ui): scrollable viewport for -v log panel …`,
+> `docs(specs,skill): close tui-log-panel-scrollable …`. Tests live in
+> `internal/ui/runprogress_viewport_test.go`. Layer 1 tests unchanged.
 
 ## Problem
 
@@ -61,14 +67,14 @@ returns to auto-tail and jumps to the bottom.
 
 ## Acceptance criteria
 
-- [ ] `charm.land/bubbles/v2` added to `go.mod` only; no other deps.
-- [ ] Keybindings listed above work; `q` still aborts the run.
-- [ ] Scroll state survives subsequent ticks (no jump-to-bottom
+- [x] `charm.land/bubbles/v2` added to `go.mod` only; no other deps.
+- [x] Keybindings listed above work; `q` still aborts the run.
+- [x] Scroll state survives subsequent ticks (no jump-to-bottom
       unless `s` toggled).
-- [ ] Layer 1 behaviour preserved when `--verbose` is off (no panel).
-- [ ] `SKILL-ui.md` gains the keybinding table (already previewed
-      under "Layer 2" — expand when this ships).
-- [ ] Tests listed above.
+- [x] Layer 1 behaviour preserved when `--verbose` is off (no panel).
+- [x] `SKILL-ui.md` gains the keybinding table (already previewed
+      under "Layer 2" — expanded on close).
+- [x] Tests listed above.
 
 ## Out of scope
 

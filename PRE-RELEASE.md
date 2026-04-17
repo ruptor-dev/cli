@@ -52,9 +52,10 @@ Document but do not block launch on these.
 - [ ] **TUI uses a 100 ms tick-based poller** that reads
       `proxy.Observations()` on every tick. A push channel from proxy
       → UI is the v2 follow-up (AUDIT.md §10).
-- [ ] **`charm.land/bubbles/v2` not pinned in `go.mod`.** Correct — no
-      component from `bubbles` is imported yet. Add when the first
-      component lands.
+- [x] **`charm.land/bubbles/v2` pinned in `go.mod`.** Added on
+      2026-04-17 on branch `feat/tui-log-panel-scrollable` alongside
+      the Layer 2 log panel. `internal/ui/runprogress.go` imports
+      `charm.land/bubbles/v2/viewport`; version `v2.1.0`.
 
 ## Infrastructure
 
