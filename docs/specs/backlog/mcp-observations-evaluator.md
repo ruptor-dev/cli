@@ -1,37 +1,50 @@
 # MCP observations not wired to evaluator
 
-> Status: **Done — 2026-04-16 (sink interface in mcp package; narrow 2-method contract; *proxy.Proxy.SetActiveTest + ResetObservation preserved)**
+> Status: **Done — 2026-04-16** (branch `feat/mcp-observations-sink-v2`;
+> Option B re-landed under the `pkg/types` rule with
+> `*proxy.Proxy.SetActiveTest` + `ResetObservation` preserved)
 > Opened: 2026-04-15
 > Priority: **ship-critical** (MCP is a v1 feature; must have working scores)
 > Est. effort: **S** (half day)
-> Decision required: **yes — Option B previously, reverted, re-evaluate**
+> Decision required: **yes — resolved, see Resolution**
+
+## Resolution (landed)
+
+Option B re-landed with two corrections over the first attempt:
+
+1. `ObservationSink` lives in `pkg/types/observation_sink.go` (per
+   `knowledge/engineering.md §60-62` — interfaces before implementations,
+   in `pkg/types/`). The first attempt placed it in `internal/proxy`;
+   moving it here removes the would-be import cycle and follows the
+   stated rule.
+2. `*proxy.Proxy.SetActiveTest` and `*proxy.Proxy.ResetObservation` are
+   preserved unchanged. The first attempt removed them and silently
+   broke live TUI sync.
+
+Behavioural notes:
+
+- `RecordFault` sets `HadError = true` unconditionally. MCP fault
+  responses ride on HTTP 200 and carry the error in the JSON-RPC
+  envelope; the prior `statusCode >= 400` heuristic would have missed
+  them. For HTTP mode the guard was a tautology anyway — every injected
+  fault returns 4xx/5xx or 0.
+- The duplicate `mcp.Observation` struct, `Handler.Observations()`, and
+  `Handler.ResetObservation` are removed. MCP hits land in the same map
+  the evaluator reads via `p.Observations()`.
+- `Proxy.MCPHandler() interface{}` removed (was dead code; only the
+  removed MCP-side observations accessor would have used it).
+
+ADR-011 § Consequences § Neutral has been updated in
+`knowledge/decisions/011-mcp-transport-scoping.md` to mark the
+divergence closed.
 
 ## History
 
-Option B (ObservationSink callback interface) landed as commit `1c59d35`
-and was reverted in `8187783` because the sink refactor removed
-`*proxy.Proxy.SetActiveTest` and `*proxy.Proxy.ResetObservation`, which
-the HTTP orchestrator relies on to pin per-test observations between
-oneshot runs. Removing them silently broke the live TUI sync.
-
-Re-attempting this spec must NOT remove those two methods. Either keep
-the sink interface narrow (2 methods) alongside the existing Proxy
-methods, or widen the interface to include lifecycle methods. Prior
-DE review recommended the narrow interface; the sibling methods stay
-on `*proxy.Proxy`.
-
-## Shipped (now reverted)
-
-Option B (callback interface). `internal/proxy.ObservationSink` defines the
-two-method contract (`RecordFault`, `RecordPassthrough`); `*proxy.Proxy`
-implements it, and `mcp.NewHandler` takes the sink at construction. The
-duplicate `mcp.Observation` struct, `Handler.Observations()`, and
-`Handler.ResetObservation` have been removed — MCP observations now land
-in the same map the evaluator already consumes via `p.Observations()`.
-
-`RecordFault` now sets `HadError = true` unconditionally (MCP fault
-responses ride on HTTP 200 and carry the error in the JSON-RPC envelope;
-the previous status-code heuristic would have missed them).
+Option B first landed as commit `1c59d35` and was reverted in `8187783`.
+The revert was a broader TUI-sync fix that restored pre-session proxy
+files wholesale, re-introducing the duplicate MCP observation map. The
+second attempt (this resolution) is on branch
+`feat/mcp-observations-sink-v2`.
 
 ## Problem
 

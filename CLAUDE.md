@@ -91,7 +91,7 @@ cli/
 │   │   └── rules/          # deterministic rule-based evaluation
 │   ├── llmclient/          # LLM API client (OpenAI, Anthropic)
 │   ├── proxy/
-│   │   ├── faults/         # fault handlers (Chain of Responsibility)
+│   │   ├── faults/         # fault handlers (Registry + Factory)
 │   │   └── mcp/            # MCP proxy mode (v1)
 │   ├── report/             # HTML + JSON report generation
 │   ├── simulate/           # user persona simulation
