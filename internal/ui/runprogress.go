@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 )
@@ -83,6 +84,17 @@ type runModel struct {
 	snap     RunSnapshot
 	quitting bool
 	aborted  bool
+	// vp is the scrollable viewport backing the verbose-mode log
+	// panel (Layer 2, `charm.land/bubbles/v2`). Only activated when
+	// ctx.LogReader is non-nil; unused in non-verbose runs.
+	vp viewport.Model
+	// vpInit tracks whether the viewport has been sized yet. First
+	// tick with a LogReader sizes it to LogPanelHeight rows.
+	vpInit bool
+	// sticky is true when the panel auto-tails (default). `s` toggles
+	// to paused; any manual scroll clears the flag. Re-enabling sticky
+	// jumps to the bottom.
+	sticky bool
 }
 
 // Program wraps the Bubbletea program so callers outside the ui
@@ -95,8 +107,22 @@ type Program struct {
 
 // NewRunProgress builds a Bubbletea program for the live run view.
 func NewRunProgress(ctx RunContext) *Program {
-	m := runModel{ctx: ctx}
+	m := runModel{ctx: ctx, sticky: true}
+	if ctx.LogReader != nil {
+		m.vp = newLogViewport()
+		m.vpInit = true
+	}
 	return &Program{prog: tea.NewProgram(m)}
+}
+
+// newLogViewport constructs the bubbles/v2 viewport sized to the log
+// panel's fixed height. Width is left to the first WindowSizeMsg.
+func newLogViewport() viewport.Model {
+	vp := viewport.New(viewport.WithHeight(LogPanelHeight))
+	vp.MouseWheelEnabled = true
+	vp.SoftWrap = false
+	vp.FillHeight = true
+	return vp
 }
 
 // Run blocks and returns the final model.
@@ -142,10 +168,35 @@ func (m runModel) Init() tea.Cmd {
 	return tick()
 }
 
+// initLogViewport is the test-time shortcut for what would otherwise
+// happen on the first WindowSizeMsg + tick: size the viewport and
+// seed content from the reader. Tests can call this so assertions
+// against YOffset after scrolls are meaningful without driving the
+// full bubbletea event loop.
+func (m runModel) initLogViewport(width int) runModel {
+	if m.ctx.LogReader == nil {
+		return m
+	}
+	if !m.vpInit {
+		m.vp = newLogViewport()
+	}
+	if width <= 0 {
+		width = 80
+	}
+	m.vp.SetWidth(width)
+	m.vp.SetHeight(LogPanelHeight)
+	m.vpInit = true
+	return m.refreshLogViewport()
+}
+
 func (m runModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
 		return m.handleKey(msg)
+	case tea.MouseWheelMsg:
+		return m.handleMouseWheel(msg)
+	case tea.WindowSizeMsg:
+		return m.handleWindowSize(msg), nil
 	case tickMsg:
 		return m.handleTick()
 	case ForceSnapshotMsg:
@@ -160,7 +211,29 @@ func (m runModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// handleWindowSize sizes the log viewport to fill the panel box. Width
+// stays wide enough for the operator's terminal; height is pinned to
+// LogPanelHeight so the panel does not grow on resize.
+func (m runModel) handleWindowSize(msg tea.WindowSizeMsg) runModel {
+	if m.ctx.LogReader == nil {
+		return m
+	}
+	w := msg.Width - 6 // border + padding
+	if w < 10 {
+		w = 10
+	}
+	m.vp.SetWidth(w)
+	m.vp.SetHeight(LogPanelHeight)
+	m.vpInit = true
+	return m
+}
+
 func (m runModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if m.ctx.LogReader != nil {
+		if handled, next, cmd := m.routeLogKey(msg); handled {
+			return next, cmd
+		}
+	}
 	switch msg.String() {
 	case "q", "ctrl+c":
 		m.aborted = true
@@ -170,10 +243,75 @@ func (m runModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// routeLogKey gives the log viewport first shot at the scroll keys.
+// Returns handled=true when the key belongs to the panel so the outer
+// switch does not also try to match it. Any manual scroll clears the
+// sticky flag; `s` toggles sticky ↔ paused.
+func (m runModel) routeLogKey(msg tea.KeyPressMsg) (bool, runModel, tea.Cmd) {
+	switch msg.String() {
+	case "s":
+		m = m.toggleSticky()
+		return true, m, nil
+	case "home":
+		m.vp.GotoTop()
+		m.sticky = false
+		return true, m, nil
+	case "end":
+		m.vp.GotoBottom()
+		m.sticky = true
+		return true, m, nil
+	case "up", "down", "pgup", "pgdown":
+		return true, m.scrollViewport(msg), nil
+	}
+	return false, m, nil
+}
+
+// scrollViewport forwards a scroll key to the viewport and clears the
+// sticky flag if the offset actually moved. Offset-unchanged keys
+// (e.g. `up` at top) leave sticky as-is so a paused operator staying
+// put does not accidentally re-enter auto-tail.
+func (m runModel) scrollViewport(msg tea.KeyPressMsg) runModel {
+	before := m.vp.YOffset()
+	var cmd tea.Cmd
+	m.vp, cmd = m.vp.Update(msg)
+	_ = cmd // viewport.Update returns nil cmds today; keep the assign for API parity
+	if m.vp.YOffset() != before {
+		m.sticky = false
+	}
+	return m
+}
+
+// toggleSticky flips auto-tail. paused → sticky jumps to the bottom so
+// the operator catches up to the latest line in one keypress.
+func (m runModel) toggleSticky() runModel {
+	m.sticky = !m.sticky
+	if m.sticky {
+		m.vp.GotoBottom()
+	}
+	return m
+}
+
+// handleMouseWheel forwards wheel events to the viewport when the log
+// panel is mounted. Scrolling clears sticky so new lines do not yank
+// the operator back to the bottom.
+func (m runModel) handleMouseWheel(msg tea.MouseWheelMsg) (tea.Model, tea.Cmd) {
+	if m.ctx.LogReader == nil {
+		return m, nil
+	}
+	before := m.vp.YOffset()
+	var cmd tea.Cmd
+	m.vp, cmd = m.vp.Update(msg)
+	if m.vp.YOffset() != before {
+		m.sticky = false
+	}
+	return m, cmd
+}
+
 func (m runModel) handleTick() (tea.Model, tea.Cmd) {
 	if m.ctx.Snapshot != nil {
 		m.snap = m.ctx.Snapshot()
 	}
+	m = m.refreshLogViewport()
 	if m.snap.Done {
 		// Render the terminal state (X/X → %) once, then quit on the
 		// next tick. Calling tea.Quit here would kill the render
@@ -181,6 +319,22 @@ func (m runModel) handleTick() (tea.Model, tea.Cmd) {
 		return m, tea.Tick(tickInterval, func(t time.Time) tea.Msg { return finalTickMsg(t) })
 	}
 	return m, tick()
+}
+
+// refreshLogViewport copies the latest ring-buffer contents into the
+// viewport. When sticky (auto-tail on), we jump to the bottom after
+// SetContent so the newest line is always visible. When paused, the
+// operator's YOffset is preserved.
+func (m runModel) refreshLogViewport() runModel {
+	if m.ctx.LogReader == nil {
+		return m
+	}
+	lines := m.ctx.LogReader.Lines(0)
+	m.vp.SetContent(strings.Join(lines, "\n"))
+	if m.sticky {
+		m.vp.GotoBottom()
+	}
+	return m
 }
 
 func (m runModel) View() tea.View {
@@ -249,33 +403,50 @@ func (m runModel) renderExperiments() string {
 	return box.Render(title + "\n" + body)
 }
 
-// renderLogPanel mounts the verbose-mode log tail between the
-// Experiments box and the Robustness bar. Layer 1 contract per
-// docs/specs/ui.md: tail-only (last LogPanelHeight lines), bordered
-// box matching the Experiments style, no scroll. The buffer owns
-// truncation; the panel only pads short renders so the box height
-// stays stable as the buffer fills.
+// renderLogPanel mounts the verbose-mode log panel between the
+// Experiments box and the Robustness bar. Layer 2 (this file): the
+// body is a bubbles/v2 viewport with scroll + pause-tail support.
+// The bordered box still matches the Experiments style so the layout
+// is stable.
 func (m runModel) renderLogPanel() string {
-	label := " Logs · tail · -v "
-	lines := m.ctx.LogReader.Lines(LogPanelHeight)
-
-	body := make([]string, 0, LogPanelHeight)
-	for _, l := range lines {
-		body = append(body, l)
-	}
-	// Pad to constant height so the Robustness bar does not bounce
-	// up and down each tick as the buffer warms.
-	for len(body) < LogPanelHeight {
-		body = append(body, "")
-	}
-
-	title := lipgloss.NewStyle().Foreground(Theme.Muted).Render(label)
+	title := lipgloss.NewStyle().Foreground(Theme.Muted).Render(m.logPanelTitle())
+	body := m.logPanelBody()
 	box := lipgloss.NewStyle().
 		Border(lipgloss.NormalBorder()).
 		BorderForeground(Theme.Border).
 		Padding(0, 2)
+	return box.Render(title + "\n" + body)
+}
 
-	return box.Render(title + "\n" + strings.Join(body, "\n"))
+// logPanelTitle reflects the current auto-tail state so the operator
+// always knows whether new lines are pushing the view.
+func (m runModel) logPanelTitle() string {
+	if m.sticky {
+		return " Logs · tail · -v "
+	}
+	return " Logs · paused (s) · -v "
+}
+
+// logPanelBody returns the pre-viewport-initialised fallback (a
+// padded tail render) or the viewport's own View once it has been
+// sized. The fallback keeps the first-frame render legible even
+// before the first WindowSizeMsg arrives.
+func (m runModel) logPanelBody() string {
+	if !m.vpInit {
+		return paddedTail(m.ctx.LogReader.Lines(LogPanelHeight), LogPanelHeight)
+	}
+	return m.vp.View()
+}
+
+// paddedTail joins `lines` with newlines and tops up to height rows
+// so the box height is stable before the viewport owns rendering.
+func paddedTail(lines []string, height int) string {
+	body := make([]string, 0, height)
+	body = append(body, lines...)
+	for len(body) < height {
+		body = append(body, "")
+	}
+	return strings.Join(body, "\n")
 }
 
 func renderExperimentLine(e ExperimentState) string {
