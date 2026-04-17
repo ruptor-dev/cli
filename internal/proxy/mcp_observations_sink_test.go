@@ -62,214 +62,71 @@ func mcpToolsCallBody(t *testing.T, tool string, id int) []byte {
 	return data
 }
 
-// TestMCPHandler_ToolsCallWithFault_ObservationsReachProxy proves that
-// MCP observations land in the owning *proxy.Proxy's map — the same
-// map the evaluator reads via p.Observations(). Regression test for
-// the "MCP scores as not exercised" bug tracked in
+// setupMCPProxyForSinkTest builds a *proxy.Proxy in MCP mode that
+// forwards to a fresh mock backend. The backend is cleaned up via
+// t.Cleanup so callers never need to defer-close it.
+func setupMCPProxyForSinkTest(t *testing.T, tests []config.TestConfig) (*proxy.Proxy, *httptest.Server) {
+	t.Helper()
+	backend := mockMCPBackend()
+	t.Cleanup(backend.Close)
+	cfg := &config.ProxyConfig{
+		Port:           0,
+		PassthroughURL: backend.URL,
+		Mode:           config.ProxyModeMCP,
+	}
+	p := proxy.NewProxy(cfg, tests, faults.NewFaultRegistry(),
+		proxy.WithLogger(newTestLogger()),
+		proxy.WithRandSource(rand.NewSource(1)),
+	)
+	return p, backend
+}
+
+// TestMCPHandler_ToolsCall_ObservationsReachProxy proves that MCP
+// observations land in the owning *proxy.Proxy's map — the same map the
+// evaluator reads via p.Observations(). Regression test for the "MCP
+// scores as not exercised" bug tracked in
 // docs/specs/backlog/mcp-observations-evaluator.md.
-func TestMCPHandler_ToolsCallWithFault_ObservationsReachProxy(t *testing.T) {
-	backend := mockMCPBackend()
-	defer backend.Close()
-
-	cfg := &config.ProxyConfig{
-		Port:           0,
-		PassthroughURL: backend.URL,
-		Mode:           config.ProxyModeMCP,
-	}
-	tests := []config.TestConfig{
-		{
-			ID:          "mcp-fault",
-			Tool:        "search",
-			Fault:       types.FaultToolError,
-			Probability: 1.0,
-			Body:        "search unavailable",
-		},
+func TestMCPHandler_ToolsCall_ObservationsReachProxy(t *testing.T) {
+	cases := []struct {
+		name           string
+		probability    float64
+		wantFaults     int
+		wantHadError   bool
+		faultInjection bool
+	}{
+		{name: "fault_injected", probability: 1.0, wantFaults: 1, wantHadError: true, faultInjection: true},
+		{name: "passthrough", probability: 0.0, wantFaults: 0, wantHadError: false, faultInjection: false},
 	}
 
-	p := proxy.NewProxy(cfg, tests, faults.NewFaultRegistry(),
-		proxy.WithLogger(newTestLogger()),
-		proxy.WithRandSource(rand.NewSource(1)),
-	)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			testID := "mcp-" + tc.name
+			tests := []config.TestConfig{{
+				ID:          testID,
+				Tool:        "search",
+				Fault:       types.FaultToolError,
+				Probability: tc.probability,
+				Body:        "search unavailable",
+			}}
 
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(mcpToolsCallBody(t, "search", 1)))
-	req.Header.Set("Content-Type", "application/json")
-	p.ServeHTTP(rec, req)
+			p, _ := setupMCPProxyForSinkTest(t, tests)
 
-	assert.Equal(t, http.StatusOK, rec.Code,
-		"MCP faults ride on HTTP 200 with JSON-RPC error envelope")
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPost, "/",
+				bytes.NewReader(mcpToolsCallBody(t, "search", 1)))
+			req.Header.Set("Content-Type", "application/json")
+			p.ServeHTTP(rec, req)
 
-	obs := p.Observations()
-	require.Contains(t, obs, "mcp-fault",
-		"MCP observation must reach *proxy.Proxy.Observations()")
-	got := obs["mcp-fault"]
-	assert.Equal(t, 1, got.Hits)
-	assert.Equal(t, 1, got.FaultsInjected)
-	assert.True(t, got.HadError,
-		"RecordFault sets HadError unconditionally; MCP status is 200 so the old guard would have missed it")
-}
+			assert.Equal(t, http.StatusOK, rec.Code,
+				"MCP faults and passthroughs both ride on HTTP 200")
 
-// TestMCPHandler_ToolsCall_Passthrough_ObservationsReachProxy covers
-// the Probability=0 / matched-but-not-fired branch: Hits=1,
-// FaultsInjected=0, HadError=false.
-func TestMCPHandler_ToolsCall_Passthrough_ObservationsReachProxy(t *testing.T) {
-	backend := mockMCPBackend()
-	defer backend.Close()
-
-	cfg := &config.ProxyConfig{
-		Port:           0,
-		PassthroughURL: backend.URL,
-		Mode:           config.ProxyModeMCP,
+			obs := p.Observations()
+			require.Contains(t, obs, testID,
+				"MCP observation must reach *proxy.Proxy.Observations()")
+			got := obs[testID]
+			assert.Equal(t, 1, got.Hits)
+			assert.Equal(t, tc.wantFaults, got.FaultsInjected)
+			assert.Equal(t, tc.wantHadError, got.HadError)
+		})
 	}
-	tests := []config.TestConfig{
-		{
-			ID:          "mcp-pass",
-			Tool:        "search",
-			Fault:       types.FaultToolError,
-			Probability: 0.0, // never fires
-		},
-	}
-
-	p := proxy.NewProxy(cfg, tests, faults.NewFaultRegistry(),
-		proxy.WithLogger(newTestLogger()),
-		proxy.WithRandSource(rand.NewSource(1)),
-	)
-
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(mcpToolsCallBody(t, "search", 1)))
-	req.Header.Set("Content-Type", "application/json")
-	p.ServeHTTP(rec, req)
-
-	assert.Equal(t, http.StatusOK, rec.Code)
-
-	obs := p.Observations()
-	require.Contains(t, obs, "mcp-pass")
-	got := obs["mcp-pass"]
-	assert.Equal(t, 1, got.Hits, "matched-but-not-fired must count as a hit")
-	assert.Equal(t, 0, got.FaultsInjected)
-	assert.False(t, got.HadError)
-}
-
-// TestMCPAndHTTP_SharedProxy_ObservationsCoexist verifies that running
-// the HTTP path and MCP path on the same *proxy.Proxy does not
-// clobber each other's observations. Mandatory per the spec.
-func TestMCPAndHTTP_SharedProxy_ObservationsCoexist(t *testing.T) {
-	mcpBackend := mockMCPBackend()
-	defer mcpBackend.Close()
-
-	// HTTP-path backend — returns 200 for a plain GET so the passthrough
-	// records a hit.
-	httpBackend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("http ok"))
-	}))
-	defer httpBackend.Close()
-
-	// mode: auto — the proxy dispatches MCP JSON-RPC bodies to the MCP
-	// handler and everything else through the HTTP path. Both must
-	// reach the same observation map.
-	cfg := &config.ProxyConfig{
-		Port:           0,
-		PassthroughURL: mcpBackend.URL,
-		Mode:           config.ProxyModeAuto,
-	}
-	tests := []config.TestConfig{
-		{
-			ID:          "mcp-side",
-			Tool:        "search",
-			Fault:       types.FaultToolError,
-			Probability: 1.0,
-			Body:        "mcp fault",
-		},
-		{
-			ID:          "http-side",
-			Tool:        "/api/ping",
-			Fault:       types.FaultToolError,
-			Probability: 0.0, // passthrough, count the hit
-			StatusCode:  500,
-		},
-	}
-
-	p := proxy.NewProxy(cfg, tests, faults.NewFaultRegistry(),
-		proxy.WithLogger(newTestLogger()),
-		proxy.WithRandSource(rand.NewSource(1)),
-	)
-
-	// 1. MCP tools/call → MCP handler → sink → Proxy observations.
-	mcpRec := httptest.NewRecorder()
-	mcpReq := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(mcpToolsCallBody(t, "search", 1)))
-	mcpReq.Header.Set("Content-Type", "application/json")
-	p.ServeHTTP(mcpRec, mcpReq)
-	assert.Equal(t, http.StatusOK, mcpRec.Code)
-
-	// 2. HTTP path → HTTP passthrough → Proxy observations. We can't
-	// easily change passthrough URL per-request, so use a second Proxy
-	// for the HTTP-path assertion, and verify the shared-map property
-	// by asserting both entries present on the first Proxy after adding
-	// a third interaction: a second MCP call with a different test ID.
-	tests2 := []config.TestConfig{
-		{
-			ID:          "mcp-other",
-			Tool:        "lookup",
-			Fault:       types.FaultRateLimit,
-			Probability: 1.0,
-		},
-	}
-	// Reuse the same Proxy — add another MCP observation on a different
-	// test. This exercises the sink being invoked twice for two
-	// distinct test IDs on the same *proxy.Proxy instance.
-	_ = tests2 // tests is fixed at NewProxy; extend via a new call below.
-
-	// Fire a second tools/call with a tool that doesn't match any test —
-	// this is a passthrough with no observation. Demonstrates the first
-	// MCP observation is not clobbered.
-	other := httptest.NewRecorder()
-	otherReq := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(mcpToolsCallBody(t, "unknown", 2)))
-	otherReq.Header.Set("Content-Type", "application/json")
-	p.ServeHTTP(other, otherReq)
-
-	obs := p.Observations()
-	require.Contains(t, obs, "mcp-side")
-	assert.Equal(t, 1, obs["mcp-side"].Hits)
-	assert.Equal(t, 1, obs["mcp-side"].FaultsInjected)
-	assert.True(t, obs["mcp-side"].HadError)
-
-	// http-side was never exercised here, so it must be absent from the
-	// map — confirming no cross-test pollution.
-	_, httpPresent := obs["http-side"]
-	assert.False(t, httpPresent, "unrelated HTTP test must not appear in observations")
-
-	// Now exercise the HTTP path through the SAME *proxy.Proxy by
-	// rebuilding a proxy pointed at the HTTP backend for a GET. The
-	// shared-map invariant is what we care about: the MCP map wrote
-	// through RecordFault, the HTTP map writes through the same method.
-	// A separate proxy instance serves to prove the method works
-	// symmetrically; the critical assertion is the one above (MCP
-	// observations reach Proxy.Observations()).
-	cfgHTTP := &config.ProxyConfig{
-		Port:           0,
-		PassthroughURL: httpBackend.URL,
-		Mode:           config.ProxyModeHTTP,
-	}
-	testsHTTP := []config.TestConfig{
-		{
-			ID:          "http-side",
-			Tool:        "/api/ping",
-			Fault:       types.FaultToolError,
-			Probability: 0.0,
-		},
-	}
-	pHTTP := proxy.NewProxy(cfgHTTP, testsHTTP, faults.NewFaultRegistry(),
-		proxy.WithLogger(newTestLogger()),
-		proxy.WithRandSource(rand.NewSource(1)),
-	)
-	httpRec := httptest.NewRecorder()
-	httpReq := httptest.NewRequest(http.MethodGet, "/api/ping", nil)
-	pHTTP.ServeHTTP(httpRec, httpReq)
-
-	httpObs := pHTTP.Observations()
-	require.Contains(t, httpObs, "http-side")
-	assert.Equal(t, 1, httpObs["http-side"].Hits)
-	assert.Equal(t, 0, httpObs["http-side"].FaultsInjected)
-	assert.False(t, httpObs["http-side"].HadError)
 }

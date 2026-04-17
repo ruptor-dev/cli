@@ -264,87 +264,78 @@ func TestMCPNonToolCall_Passthrough(t *testing.T) {
 	assert.True(t, sink.empty())
 }
 
+// assertFaultObservation verifies the sink recorded a single fault hit
+// for the given test ID. Used by fault-type-specific tests below to
+// guard the P2 regression where rate_limit / invalid_json /
+// empty_response stopped asserting observations.
+func assertFaultObservation(t *testing.T, sink *fakeSink, testID string) {
+	t.Helper()
+	require.True(t, sink.contains(testID), "sink must record observation for %q", testID)
+	obs := sink.snapshot(testID)
+	assert.Equal(t, 1, obs.Hits)
+	assert.Equal(t, 1, obs.FaultsInjected)
+	assert.True(t, obs.HadError, "MCP fault responses ride on HTTP 200; HadError must be unconditional")
+}
+
 func TestMCPRateLimitFault(t *testing.T) {
 	backend := mockMCPServer()
 	defer backend.Close()
 
-	tests := []config.TestConfig{
-		{
-			ID:          "test-rate-limit",
-			Tool:        "search",
-			Fault:       types.FaultRateLimit,
-			Probability: 1.0,
-			RetryAfterS: 5,
-		},
-	}
-
-	h, _ := newHandler(t, backend, tests)
+	tests := []config.TestConfig{{
+		ID: "test-rate-limit", Tool: "search",
+		Fault: types.FaultRateLimit, Probability: 1.0, RetryAfterS: 5,
+	}}
+	h, sink := newHandler(t, backend, tests)
 	body := jsonRPCBody("tools/call", 1, map[string]interface{}{"name": "search"})
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(body))
-	h.ServeHTTP(rec, req)
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(body)))
 
 	assert.Equal(t, http.StatusOK, rec.Code)
-
 	var resp types.JSONRPCResponse
-	err := json.Unmarshal(rec.Body.Bytes(), &resp)
-	require.NoError(t, err)
-	assert.NotNil(t, resp.Error)
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
 	assert.Equal(t, -32000, resp.Error.Code)
 	assert.Equal(t, "rate limited", resp.Error.Message)
+	assertFaultObservation(t, sink, "test-rate-limit")
 }
 
 func TestMCPInvalidJSONFault(t *testing.T) {
 	backend := mockMCPServer()
 	defer backend.Close()
 
-	tests := []config.TestConfig{
-		{
-			ID:          "test-garbage",
-			Tool:        "search",
-			Fault:       types.FaultInvalidJSON,
-			Probability: 1.0,
-		},
-	}
-
-	h, _ := newHandler(t, backend, tests)
+	tests := []config.TestConfig{{
+		ID: "test-garbage", Tool: "search",
+		Fault: types.FaultInvalidJSON, Probability: 1.0,
+	}}
+	h, sink := newHandler(t, backend, tests)
 	body := jsonRPCBody("tools/call", 1, map[string]interface{}{"name": "search"})
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(body))
-	h.ServeHTTP(rec, req)
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(body)))
 
 	assert.Equal(t, http.StatusOK, rec.Code)
-
-	// The body should NOT be valid JSON.
 	var resp types.JSONRPCResponse
-	err := json.Unmarshal(rec.Body.Bytes(), &resp)
-	assert.Error(t, err, "expected garbage response to be invalid JSON")
+	assert.Error(t, json.Unmarshal(rec.Body.Bytes(), &resp), "expected garbage response")
+	assertFaultObservation(t, sink, "test-garbage")
 }
 
 func TestMCPEmptyResponseFault(t *testing.T) {
 	backend := mockMCPServer()
 	defer backend.Close()
 
-	tests := []config.TestConfig{
-		{
-			ID:          "test-empty",
-			Tool:        "search",
-			Fault:       types.FaultEmptyResponse,
-			Probability: 1.0,
-		},
-	}
-
-	h, _ := newHandler(t, backend, tests)
+	tests := []config.TestConfig{{
+		ID: "test-empty", Tool: "search",
+		Fault: types.FaultEmptyResponse, Probability: 1.0,
+	}}
+	h, sink := newHandler(t, backend, tests)
 	body := jsonRPCBody("tools/call", 1, map[string]interface{}{"name": "search"})
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(body))
-	h.ServeHTTP(rec, req)
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(body)))
 
 	assert.Equal(t, http.StatusOK, rec.Code)
 	assert.Empty(t, rec.Body.String())
+	assertFaultObservation(t, sink, "test-empty")
 }
 
 // TestServeHTTP_BodyOverflow_Returns413 ensures that a request body larger
