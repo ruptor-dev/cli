@@ -1,6 +1,8 @@
 # `cmd.SilenceErrors: true` swallows cobra error messages
 
-> Status: **Backlog**
+> Status: **Done — 2026-04-16** — Option A landed; `main()` prints
+> cobra errors via `ui.Error` (commit ba4d11a) with integration tests
+> covering the unknown-subcommand and missing-arg paths (commit b4bf76d).
 > Opened: 2026-04-16
 > Priority: **medium**
 > Est. effort: **XS** (30 min)

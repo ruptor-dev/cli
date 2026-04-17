@@ -19,12 +19,12 @@ without the context of the session that opened it. Sorted by priority.
 | ~~[evaluator-recovered-signal](evaluator-recovered-signal.md)~~ | ship-critical | M | **resolved** | ✅ done | Option A shipped: `proxy.Observation.Recovered()` wired into `evaluateTest`; recovery semantics documented. |
 | ~~[otel-exporter-wiring](otel-exporter-wiring.md)~~ | high | XS | **resolved** | ✅ done | Option B: deferred to v2, v1-scope updated, ADR-010 filed. Must ship in v2. |
 | ~~[mcp-proxy-mode](mcp-proxy-mode.md)~~ | ship-critical | L | **resolved** | ✅ done | MCP proxy v1 shipped: Streamable HTTP, `tools/call` only. stdio/SSE/non-tool-call/WebSocket → v2. See ADR-011. |
-| ~~[mcp-observations-evaluator](mcp-observations-evaluator.md)~~ | ship-critical | S | **resolved** | ✅ done | Narrow `mcp.ObservationSink` (consumer-side interface) routes MCP observations into `*proxy.Proxy`; `SetActiveTest` / `ResetObservation` preserved. |
+| ~~[mcp-observations-evaluator](mcp-observations-evaluator.md)~~ | ship-critical | S | **resolved** | ✅ done | Narrow `types.ObservationSink` in `pkg/types/` routes MCP observations into `*proxy.Proxy`; `SetActiveTest` / `ResetObservation` preserved. |
 | [mcp-sse-streaming](mcp-sse-streaming.md) | medium | M | no | pending | SSE streaming deferred from MCP v1 — faults not injected on SSE responses. |
 | [ui-stdout-stderr-split](ui-stdout-stderr-split.md) | medium | S | **yes** | pending | Route `ui.Success`/`Error`/`Info`/`Warning`/`Dim` to stderr; previously landed then reverted, needs redesign + test migration. |
 | [tui-log-panel-scrollable](tui-log-panel-scrollable.md) | medium | M | no | pending | Layer B upgrade to the `-v` log panel: `bubbles/v2` viewport with scroll keys + auto-tail toggle. |
 | [proxy-mode-decode-validator](proxy-mode-decode-validator.md) | low | XS | no | pending | `ProxyMode.UnmarshalYAML/Text` — reject non-canonical values at decode, not just at Validate. |
-| [cobra-silence-errors](cobra-silence-errors.md) | medium | XS | no | pending | Drop `SilenceErrors: true` or print via `ui.Error` — currently swallowed cobra errors silently. |
+| ~~[cobra-silence-errors](cobra-silence-errors.md)~~ | medium | XS | no | ✅ done | Option A: errors printed via `ui.Error` in `main`; integration tests cover unknown-subcmd and missing-arg paths. |
 | [testing-comprehensive-plan](testing-comprehensive-plan.md) | high | XL | **resolved** | pending | 60-category testing plan, all decisions locked. Supersedes `testing-coverage-matrix.md`. Subsumes `fuzz-parsers`, `examples-ci-smoke`, `make-test-int-target`. |
 | [examples-ci-smoke](examples-ci-smoke.md) | medium | M | no | subsumed | Subsumed by testing-comprehensive-plan (#3 system, #31 smoke). |
 | [fuzz-parsers](fuzz-parsers.md) | medium | S | no | subsumed | Subsumed by testing-comprehensive-plan (#21 fuzz). |
